@@ -161,6 +161,14 @@ def build_message_content(
 # the attachment never reached the model.
 MIN_PROMPT_TOKENS_WITH_MEDIA = 200
 
+# Historical image/video bytes are intentionally not replayed on every turn.
+# Reattaching is explicit and avoids repeatedly decoding and prefilling the same
+# large media payload for ordinary text follow-ups.
+OMITTED_MEDIA_NOTE = (
+    "[A media attachment from this earlier turn is not included in this request. "
+    "Ask the user to reattach it before making new claims about its visual content.]"
+)
+
 
 def media_drop_warning(media_items: list[dict], prompt_tokens: int) -> str | None:
     """Detect an attachment that was accepted and then silently dropped.
@@ -232,8 +240,10 @@ def create_chat_function(
     Returns:
         Chat function compatible with gr.ChatInterface
     """
-    # Store media from previous messages to include in context
-    media_cache = {}  # Maps message index to list of file data URLs
+    # Remember which historical user messages had media without retaining or
+    # replaying their base64 payloads. A 16 MB video becomes roughly 22 MB in a
+    # request and otherwise gets decoded and prefetched again on every turn.
+    media_message_indexes: set[int] = set()
 
     def chat(message: dict, history: list) -> str:
         """
@@ -246,11 +256,15 @@ def create_chat_function(
         Returns:
             Assistant response text
         """
-        nonlocal media_cache
-
         # Extract text and files from message
         text = message.get("text", "") if isinstance(message, dict) else message
         files = message.get("files", []) if isinstance(message, dict) else []
+
+        # Gradio reuses the chat function after the user clears the conversation.
+        # Drop indexes from the previous conversation so they cannot annotate a
+        # new chat whose message numbering starts at zero again.
+        if not history:
+            media_message_indexes.clear()
 
         # Debug output
         import sys
@@ -263,49 +277,43 @@ def create_chat_function(
         # Build messages list for API
         messages = []
 
-        # Process history - keep media content for multimodal context
+        omitted_media_count = 0
+        # Process history as text only. Historical media is represented by a
+        # marker so the model knows it must request a reattachment rather than
+        # hallucinating unseen visual details.
         for i, msg in enumerate(history):
             if isinstance(msg, dict):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
 
-                # Check if this message had media cached
-                if i in media_cache and role == "user":
-                    # Rebuild multimodal content with cached media
-                    if isinstance(content, str):
-                        rebuilt_content = [{"type": "text", "text": content}]
-                    elif isinstance(content, list):
-                        # Extract just text parts
-                        text_parts = [
-                            p.get("text", "")
-                            for p in content
-                            if isinstance(p, dict) and p.get("type") == "text"
-                        ]
-                        rebuilt_content = (
-                            [{"type": "text", "text": " ".join(text_parts)}]
-                            if text_parts
-                            else []
-                        )
-                    else:
-                        rebuilt_content = [{"type": "text", "text": str(content)}]
+                if isinstance(content, list):
+                    text_parts = [
+                        p.get("text", "")
+                        for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    ]
+                    content = " ".join(text_parts)
+                elif isinstance(content, dict):
+                    content = content.get("text", str(content))
+                elif not isinstance(content, str):
+                    content = str(content)
 
-                    # Add cached media
-                    for media_item in media_cache[i]:
-                        rebuilt_content.append(media_item)
+                if i in media_message_indexes and role == "user":
+                    content = (
+                        f"{content}\n\n{OMITTED_MEDIA_NOTE}"
+                        if content
+                        else OMITTED_MEDIA_NOTE
+                    )
+                    omitted_media_count += 1
 
-                    messages.append({"role": role, "content": rebuilt_content})
-                else:
-                    # No media, just text
-                    if isinstance(content, list):
-                        text_parts = [
-                            p.get("text", "")
-                            for p in content
-                            if isinstance(p, dict) and p.get("type") == "text"
-                        ]
-                        content = " ".join(text_parts)
-                    elif isinstance(content, dict):
-                        content = content.get("text", str(content))
-                    messages.append({"role": role, "content": content})
+                messages.append({"role": role, "content": content})
+
+        if omitted_media_count:
+            print(
+                f"[Chat] Omitted historical media from {omitted_media_count} "
+                "message(s); reattach to analyze it again",
+                flush=True,
+            )
 
         # Encode attachments once: a phone video is tens of megabytes and
         # base64-encoding it twice per turn is pure latency.
@@ -314,18 +322,20 @@ def create_chat_function(
         except ValueError as e:
             return f"Error: {e}"
 
-        # Build current message content and cache media
+        # Build current message content. Media is sent only on this upload turn.
         current_content = build_message_content(
             text, files if files else None, media_items=media_items
         )
         messages.append({"role": "user", "content": current_content})
 
-        # Cache media for this message (will be at index len(history) after this turn)
+        # Remember attachment presence, not its base64 bytes. This message will
+        # appear at index len(history) when Gradio submits the next turn.
         if media_items:
             current_idx = len(history)
-            media_cache[current_idx] = media_items
+            media_message_indexes.add(current_idx)
             print(
-                f"[Chat] Cached {len(media_items)} media items for message {current_idx}",
+                f"[Chat] Sent {len(media_items)} media item(s) for message {current_idx}; "
+                "historical replay disabled",
                 flush=True,
             )
 
@@ -508,7 +518,8 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
         # Create ChatInterface with multimodal support
         description = (
             "Chat with vision-language models on Apple Silicon. "
-            "Upload images or videos!"
+            "Upload images or videos! Attachments are analyzed only on the turn "
+            "where they are uploaded; reattach one for later visual questions."
         )
         if capability_warning:
             description += f"\n\n**WARNING:** {capability_warning}"
