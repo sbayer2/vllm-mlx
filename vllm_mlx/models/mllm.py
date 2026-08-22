@@ -105,6 +105,23 @@ FRAME_FACTOR = 2  # Frames must be divisible by this
 DEFAULT_FPS = 2.0  # Default frames per second for video
 MIN_FRAMES = 4
 MAX_FRAMES = 128  # Practical limit for most MLLMs
+MIN_FRAME_DIMENSION = 16  # Below this a "decoded" frame is not a real frame
+
+# Container suffix to use when spilling a base64 video to a temp file. The
+# subtype of the MIME type is not the container name ("video/quicktime" is a
+# .mov, "video/x-matroska" is a .mkv), and while ffmpeg content-sniffs, several
+# decoders infer the container from the filename extension instead.
+VIDEO_MIME_TO_SUFFIX = {
+    "video/quicktime": ".mov",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/ogg": ".ogg",
+    "video/x-matroska": ".mkv",
+    "video/x-msvideo": ".avi",
+    "video/mpeg": ".mpeg",
+    "video/x-m4v": ".m4v",
+    "video/3gpp": ".3gp",
+}
 IMAGE_FACTOR = 28  # For smart resize
 
 # Security: File size limits (in bytes)
@@ -863,9 +880,16 @@ def decode_base64_video(
     if base64_string.startswith("data:video/"):
         # Format: data:video/mp4;base64,AAAA...
         header, data = base64_string.split(",", 1)
-        # Extract extension from header (e.g., "data:video/mp4;base64" -> "mp4")
-        format_part = header.split(";")[0]  # "data:video/mp4"
-        ext = "." + format_part.split("/")[-1]  # ".mp4"
+        # Extract the MIME type from the header
+        # (e.g. "data:video/quicktime;base64" -> "video/quicktime")
+        mime_type = header.split(";")[0][len("data:") :].strip().lower()
+        ext = VIDEO_MIME_TO_SUFFIX.get(mime_type, "")
+        if not ext:
+            # Unknown MIME: the subtype is usually the container name, but
+            # never trust it blindly - "video/x-matroska" would yield
+            # ".x-matroska". Fall back to .mp4 for anything unrecognised.
+            subtype = mime_type.split("/")[-1]
+            ext = f".{subtype}" if subtype.isalnum() else ".mp4"
     else:
         # Assume mp4 if no header
         data = base64_string
@@ -1197,6 +1221,57 @@ def smart_nframes(
     return int(nframes)
 
 
+def assert_video_decoded(
+    frames: "list[np.ndarray] | np.ndarray",
+    video_path: str,
+    *,
+    height_axis: int = 0,
+    width_axis: int = 1,
+) -> tuple[int, int, int]:
+    """Validate a decoded frame sequence before it is handed to a model.
+
+    Every video failure mode seen so far (unreadable container, unseekable
+    input, a codec the build cannot decode) produced an empty or degenerate
+    frame list and then a perfectly plausible HTTP 200 answer of the form
+    "I don't see any video" — which reads as a model failure and is not one.
+    Assert on the frames, not on the absence of an exception.
+
+    Args:
+        frames: Decoded frames, either a list of HWC arrays or a stacked
+            array whose per-frame axes are given by height_axis/width_axis.
+        video_path: Source path, for the error message.
+        height_axis: Index of the height axis within a single frame.
+        width_axis: Index of the width axis within a single frame.
+
+    Returns:
+        Tuple of (frame_count, width, height).
+    """
+    count = len(frames)
+    if count == 0:
+        raise ValueError(
+            f"Decoded 0 frames from {video_path}. The container or codec could "
+            "not be read - this is a decode failure, not a model failure."
+        )
+
+    first = frames[0]
+    shape = getattr(first, "shape", ())
+    if len(shape) <= max(height_axis, width_axis):
+        raise ValueError(
+            f"Decoded frames from {video_path} have unexpected shape {shape}"
+        )
+
+    height, width = int(shape[height_axis]), int(shape[width_axis])
+    if height < MIN_FRAME_DIMENSION or width < MIN_FRAME_DIMENSION:
+        raise ValueError(
+            f"Implausible frame size {width}x{height} decoded from {video_path}"
+        )
+
+    logger.info(
+        f"Video decode OK: {count} frames, {width}x{height}, from {video_path}"
+    )
+    return count, width, height
+
+
 def extract_video_frames_smart(
     video_path: str,
     fps: float = DEFAULT_FPS,
@@ -1260,6 +1335,15 @@ def extract_video_frames_smart(
         frames.append(frame)
 
     cap.release()
+
+    # Seeking by frame index can silently return nothing on long-GOP codecs,
+    # so report what was actually decoded rather than what was requested.
+    if len(frames) < nframes:
+        logger.warning(
+            f"Requested {nframes} frames from {video_path} but decoded "
+            f"{len(frames)}: seeking skipped {nframes - len(frames)} frame(s)"
+        )
+    assert_video_decoded(frames, video_path)
 
     return frames
 
