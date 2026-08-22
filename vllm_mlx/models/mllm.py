@@ -1713,6 +1713,8 @@ class MLXMultimodalLM:
         video_fps: float = DEFAULT_FPS,
         video_max_frames: int = MAX_FRAMES,
         tools: list | None = None,
+        enable_thinking: bool = True,
+        chat_template_kwargs: dict | None = None,
     ) -> tuple[str, dict]:
         """Preprocess messages into prompt + media kwargs for native video.
 
@@ -1745,17 +1747,36 @@ class MLXMultimodalLM:
             messages, video_fps, video_max_frames
         )
 
-        # Use HF processor's chat template (handles timestamp interleaving)
-        template_kwargs: dict = {}
+        # Use HF processor's chat template (handles timestamp interleaving).
+        # enable_thinking and any other chat_template_kwargs have to reach this
+        # template too. The frames-as-images path forwards them, so a video
+        # request that dropped them would keep reasoning for thousands of
+        # tokens after the operator had turned thinking off server-wide with
+        # --default-chat-template-kwargs '{"enable_thinking": false}' - and the
+        # flag would appear to work, because text and image requests honor it.
+        template_kwargs: dict = dict(chat_template_kwargs or {})
         if tools:
             template_kwargs["tools"] = tools
+        template_kwargs.setdefault("enable_thinking", enable_thinking)
 
-        text = self.processor.apply_chat_template(
-            native_messages,
-            tokenize=False,
-            add_generation_prompt=True,
-            **template_kwargs,
-        )
+        try:
+            text = self.processor.apply_chat_template(
+                native_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
+        except TypeError:
+            # This template doesn't accept some forwarded chat_template_kwargs
+            # - drop the optional ones and retry, mirroring the frames path.
+            for key in chat_template_kwargs or {}:
+                template_kwargs.pop(key, None)
+            text = self.processor.apply_chat_template(
+                native_messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                **template_kwargs,
+            )
 
         # Collect the media paths emitted by the translation step: images,
         # videos, and audio (explicit audio_url, or auto-extracted from
@@ -1827,6 +1848,8 @@ class MLXMultimodalLM:
         video_fps: float = DEFAULT_FPS,
         video_max_frames: int = MAX_FRAMES,
         tools: list | None = None,
+        enable_thinking: bool = True,
+        chat_template_kwargs: dict | None = None,
         **kwargs,
     ) -> MLLMOutput:
         """Generate using native video pipeline (Qwen-family models).
@@ -1844,7 +1867,12 @@ class MLXMultimodalLM:
             ) from exc
 
         text, gen_kwargs = self._prepare_native_video_inputs(
-            messages, video_fps, video_max_frames, tools
+            messages,
+            video_fps,
+            video_max_frames,
+            tools,
+            enable_thinking=enable_thinking,
+            chat_template_kwargs=chat_template_kwargs,
         )
         gen_kwargs["temperature"] = temperature
 
@@ -2330,6 +2358,8 @@ class MLXMultimodalLM:
                     video_fps=video_fps,
                     video_max_frames=video_max_frames,
                     tools=tools,
+                    enable_thinking=enable_thinking,
+                    chat_template_kwargs=chat_template_kwargs,
                     **kwargs,
                 )
             except ImportError as exc:
@@ -2744,6 +2774,8 @@ class MLXMultimodalLM:
                     video_fps=video_fps,
                     video_max_frames=video_max_frames,
                     tools=tools,
+                    enable_thinking=enable_thinking,
+                    chat_template_kwargs=chat_template_kwargs,
                     **kwargs,
                 )
             except ImportError as exc:
