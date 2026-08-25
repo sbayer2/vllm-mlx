@@ -1,4 +1,4 @@
-# "I don't see any video" — Six Bugs Between a 27B VLM and an iPhone Clip
+# "I don't see any video" — Seven Bugs Between a 27B VLM and an iPhone Clip
 
 ## How a single token count separated a model failure from four layers of plumbing failure, and what a Qwen VLM actually sees when you hand it a video
 
@@ -10,9 +10,9 @@ I asked a 27-billion-parameter vision-language model, running locally on a Mac, 
 
 HTTP 200. No errors in the log. A fluent, confident, entirely reasonable answer.
 
-The model was telling the truth. The video had been accepted, base64-decoded, parsed into a `video_url` content part — and then silently discarded before it ever reached the model. Fixing that turned up five more bugs stacked behind it, each of which also returned HTTP 200 and a plausible-sounding answer.
+The model was telling the truth. The video had been accepted, base64-decoded, parsed into a `video_url` content part — and then silently discarded before it ever reached the model. Fixing that turned up five more bugs stacked behind it, each of which also returned HTTP 200 and a plausible-sounding answer — and then a seventh that was the exact opposite: a crash loud enough to look fatal, which turned out to be harmless.
 
-This is a walkthrough of all six, the one measurement that found every one of them, and two things I learned about what these models actually receive when you feed them a video. Everything here is reproducible; the branch is linked at the end.
+This is a walkthrough of all seven, the one measurement that found the silent ones, and two things I learned about what these models actually receive when you feed them a video. Everything here is reproducible; the branch is linked at the end.
 
 **The stack:** vllm-mlx 0.4.1, mlx-vlm 0.6.15, OpenCV 5.0.0, Python 3.14, macOS on Apple Silicon, serving `mlx-community/Qwen3.8-27B-4bit`.
 
@@ -199,6 +199,59 @@ After the fix: **396 tokens in 60.8 seconds, HTTP 200.**
 
 ---
 
+## Bug 6: The crash that waited until everything else worked
+
+With video working, one thing remained: `Ctrl+C` on the server produced
+
+```
+zsh: segmentation fault  vllm-mlx serve mlx-community/Qwen3.8-27B-4bit ...
+```
+
+*after* `Application shutdown complete` and `Finished server process`. Every request had been served. Nothing in flight was lost. But a clean shutdown that ends in a segfault is not a clean shutdown, and "probably harmless" is not a diagnosis.
+
+It turned out macOS had been writing the answer to disk the whole time. `~/Library/Logs/DiagnosticReports/` held six `Python-*.ips` crash reports, all byte-identical:
+
+```
+EXC_BAD_ACCESS (SIGSEGV), KERN_INVALID_ADDRESS at 0x350
+  _pthread_exit -> _pthread_tsd_cleanup
+    -> dyld::ThreadLocalVariables::finalizeList
+      -> shared_ptr<mlx::core::detail::CompileCache>::~shared_ptr
+        -> mlx::core::detail::CompileCache::CacheEntry::~CacheEntry()
+          -> _Py_Dealloc
+```
+
+Read it bottom-up and the mechanism is unambiguous. MLX keeps its compile cache in **thread-local storage**, and the cache entries own Python objects. When a thread that has run compiled MLX work exits, dyld runs its TLS destructors, which call `_Py_Dealloc` — deallocating Python objects from a thread that is already dying, with no valid thread state and no GIL. `0x350` is a fixed offset off a null pointer.
+
+**Two assumptions died reading those reports.** First, it is not thread-specific: five reports fault on `asyncio_0`, but one faults on `simple-generate_0` — vllm-mlx's *pinned* MLX worker. Any plan to reroute work between executors was dead on arrival. Second, it is not really video-specific either. `asyncio_0` is the default-executor thread that **lifespan shutdown itself creates**, via `_run_blocking_engine_cache_io()`, to persist the prefix cache. Shutdown spawns a thread, touches MLX from it, and lets it die.
+
+This is an MLX bug, and vllm-mlx cannot fix it: MLX exposes no way to clear that cache from Python. `clear_streams()` covers streams, `clear_cache()` covers memory, and nothing covers the compile cache. The crash can only be outrun — exit before the doomed threads do.
+
+The first attempt was wrong, and the way it was wrong is the useful part:
+
+```python
+uvicorn.run(app, host=..., port=...)
+_exit_without_finalizing()          # never reached in time
+```
+
+Still crashed. `uvicorn.run()` calls `asyncio.run()`, which calls `loop.shutdown_default_executor()` — it **joins the default-executor threads inside itself**. `asyncio_0` dies before `uvicorn.run` ever returns, so a guard placed after it is far too late. Moving the exit to the end of lifespan shutdown, which runs earlier, fixed it.
+
+Measured, each run serving a real video request before the signal:
+
+| | new crash report? |
+|---|---|
+| unpatched baseline | **yes** |
+| guard after `uvicorn.run()` | **yes** |
+| guard at end of lifespan shutdown | no |
+| repeat ×2 | no, no |
+| `Ctrl+C` via the wrapper script | no |
+| `SIGHUP` (closing the Terminal window) | no |
+
+The absence of a new `.ips` file is the whole test, and it is a better one than watching the exit code, because the shell prints `segmentation fault` for a signal the process may have survived logically. The one `atexit` handler vllm-mlx owns — temp-file cleanup — is called explicitly before the exit; `Cleaned up 1 temp files` in the log confirms it still runs.
+
+**The lesson is cheaper than the bug: check `~/Library/Logs/DiagnosticReports/` first.** Six reports with a complete symbolicated stack sat there through an entire debugging session, while the write-up said "not diagnosed."
+
+---
+
 ## What we did *not* port, and why that mattered most
 
 The parallel llama.cpp session had fixed two genuine video bugs and offered them for porting:
@@ -293,9 +346,11 @@ cd vllm-mlx
 git checkout fix/video-silently-dropped
 ```
 
-Six commits, each self-contained:
+Eight commits, each self-contained:
 
 ```
+dc1ca3d  docs: document VLLM_MLX_CLEAN_EXIT
+7f0200f  fix(shutdown): exit the serve process before MLX's TLS teardown crashes
 8d174bf  Stop replaying historical media in Gradio chat
 59e9110  fix(video): honor enable_thinking on the native video path
 d921030  fix(chat-ui): surface attachments the server dropped
@@ -355,7 +410,7 @@ Two numbers within a few dozen of each other means your attachment is being drop
 
 Two things I have not resolved, stated plainly rather than left for someone to trip over:
 
-**A shutdown segfault after video requests.** Exiting the server cleanly after processing video produces a segfault during interpreter teardown, after `Application shutdown complete`. A text-only model exits cleanly (status 0); the same 27B VLM with only text requests also exits cleanly. So it correlates with the video path, but I never ran the decisive test — 27B, one video request, then SIGINT with a fault handler attached. It is post-shutdown, so nothing in flight is at risk, but it is unexplained.
+**No standalone reproducer for the MLX bug.** The workaround in Bug 6 is verified, but the underlying defect belongs upstream in MLX and I cannot yet reduce it to a small script. `mx.compile` on a worker thread that then exits — the obvious candidate, and three variants of it including one that binds a per-thread GPU stream and keeps a live array — all exit cleanly. Until it reproduces in isolation I have not filed it, because a bug report that doesn't reproduce costs a maintainer a day and teaches them nothing.
 
 **Per-video sampling rate with multiple clips.** When a request carries more than one video, the first clip's sampled fps is applied to all of them, because `mlx_vlm.prepare_inputs` takes a single scalar `fps`. That value drives Qwen's interleaved timestamp tokens, so the second clip's frames get labelled using the first clip's rate. Small when the sources have similar frame rates; wrong in principle. Fixing it means calling the processor directly instead of routing through `mlx_vlm.generate`.
 
@@ -363,7 +418,7 @@ Two things I have not resolved, stated plainly rather than left for someone to t
 
 ## The pattern
 
-Five of the six bugs shared one shape: **an allow-list, a lookup, or a keyword that didn't recognize valid input, and no error anywhere.**
+Five of the seven bugs shared one shape: **an allow-list, a lookup, or a keyword that didn't recognize valid input, and no error anywhere.**
 
 - A MIME allow-list without `video/quicktime` (llama.cpp, same week)
 - A capability check that matched on names instead of reading the declared config
@@ -374,6 +429,8 @@ Five of the six bugs shared one shape: **an allow-list, a lookup, or a keyword t
 Every one returned HTTP 200 with a coherent answer. Not a single one raised. And in every case, the model got blamed for a plumbing failure — which is the expensive part, because you can burn days tuning prompts against a pipeline that discarded your input before inference began.
 
 Multimodal pipelines have many places to drop a payload and very few places that complain. So assert on the artifact, not on the absence of an exception. Count the frames. Look at the frame. And when in doubt, send the same prompt twice and diff the token count.
+
+The seventh bug was the mirror image, and worth keeping in view for balance: a segfault, the loudest failure mode a process has, which turned out to cost nothing at all because it fired after the last request was served. Six failures that looked like success, one success that looked like failure. Neither is legible from the outside — which is the argument for measuring the artifact rather than reading the vibe of the output.
 
 ---
 

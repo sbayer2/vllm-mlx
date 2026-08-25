@@ -369,7 +369,7 @@
 <header>
   <div class="kicker">Post-mortem / Local multimodal inference</div>
   <h1>&ldquo;I don&rsquo;t see any video&rdquo;</h1>
-  <p class="dek">Six bugs sat between a 27B vision-language model and an 8-second iPhone clip. Every one of them returned HTTP 200 with a confident, fluent answer. One token count found them all.</p>
+  <p class="dek">Seven bugs sat between a 27B vision-language model and an 8-second iPhone clip. Six returned HTTP 200 with a confident, fluent answer; the seventh was a segfault that cost nothing. One token count found the silent ones.</p>
   <div class="byline">
     <span>vllm-mlx 0.4.1</span>
     <span>mlx-vlm 0.6.15</span>
@@ -385,9 +385,9 @@
 
   <p>HTTP 200. No errors in the log. A fluent, confident, entirely reasonable answer.</p>
 
-  <p>The model was telling the truth. The video had been accepted, base64-decoded, parsed into a <code>video_url</code> content part &mdash; and then silently discarded before it ever reached the model. Fixing that turned up five more bugs stacked behind it, each of which also returned HTTP 200 and a plausible-sounding answer.</p>
+  <p>The model was telling the truth. The video had been accepted, base64-decoded, parsed into a <code>video_url</code> content part &mdash; and then silently discarded before it ever reached the model. Fixing that turned up five more bugs stacked behind it, each of which also returned HTTP 200 and a plausible-sounding answer &mdash; and then a seventh that was the exact opposite: a crash loud enough to look fatal, which turned out to be harmless.</p>
 
-  <p>This is a walkthrough of all six, the one measurement that found every one of them, and two things I learned about what these models actually receive when you feed them a video.</p>
+  <p>This is a walkthrough of all seven, the one measurement that found the silent ones, and two things I learned about what these models actually receive when you feed them a video.</p>
 </section>
 
 <section>
@@ -563,6 +563,53 @@ enable_thinking=False  -&gt;  ...&lt;|im_start|&gt;assistant\n&lt;think&gt;\n\n&
 </section>
 
 <section>
+  <div class="bugno">Bug 06</div>
+  <h2>The crash that waited until everything else worked</h2>
+
+  <p>With video working, one thing remained. <code>Ctrl+C</code> on the server produced a segfault &mdash; <em>after</em> <code>Application shutdown complete</code> and <code>Finished server process</code>. Every request had been served; nothing in flight was lost. But a clean shutdown that ends in a segfault is not a clean shutdown, and &ldquo;probably harmless&rdquo; is not a diagnosis.</p>
+
+  <p>macOS had been writing the answer to disk the whole time. <code>~/Library/Logs/DiagnosticReports/</code> held six <code>Python-*.ips</code> reports, all byte-identical:</p>
+
+<pre><code>EXC_BAD_ACCESS (SIGSEGV), KERN_INVALID_ADDRESS at 0x350
+  _pthread_exit -&gt; _pthread_tsd_cleanup
+    -&gt; dyld::ThreadLocalVariables::finalizeList
+      -&gt; shared_ptr&lt;mlx::core::detail::CompileCache&gt;::~shared_ptr
+        -&gt; mlx::core::detail::CompileCache::CacheEntry::~CacheEntry()
+          -&gt; _Py_Dealloc</code></pre>
+
+  <p>Read it bottom-up and the mechanism is unambiguous. MLX keeps its compile cache in <strong>thread-local storage</strong>, and the entries own Python objects. When a thread that has run compiled MLX work exits, dyld runs its TLS destructors, which call <code>_Py_Dealloc</code> &mdash; deallocating Python objects from a thread that is already dying, with no valid thread state and no GIL. <code>0x350</code> is a fixed offset off a null pointer.</p>
+
+  <p><strong>Two assumptions died reading those reports.</strong> It is not thread-specific: five faults land on <code>asyncio_0</code>, but one lands on <code>simple-generate_0</code> &mdash; vllm-mlx's <em>pinned</em> MLX worker &mdash; so any plan to reroute work between executors was dead on arrival. And it is not really video-specific: <code>asyncio_0</code> is the default-executor thread that <strong>lifespan shutdown itself creates</strong>, via <code>_run_blocking_engine_cache_io()</code>, to persist the prefix cache. Shutdown spawns a thread, touches MLX from it, and lets it die.</p>
+
+  <p>This is an MLX bug, and vllm-mlx cannot fix it: MLX exposes no way to clear that cache from Python. <code>clear_streams()</code> covers streams, <code>clear_cache()</code> covers memory, nothing covers the compile cache. It can only be outrun &mdash; exit before the doomed threads do.</p>
+
+  <p>The first attempt was wrong, and how it was wrong is the useful part:</p>
+
+<pre><code>uvicorn.run(app, host=..., port=...)
+_exit_without_finalizing()          # never reached in time</code></pre>
+
+  <p>Still crashed. <code>uvicorn.run()</code> calls <code>asyncio.run()</code>, which calls <code>loop.shutdown_default_executor()</code> &mdash; it <strong>joins the default-executor threads inside itself</strong>. <code>asyncio_0</code> dies before <code>uvicorn.run</code> ever returns, so a guard placed after it is far too late. Moving the exit to the end of lifespan shutdown, which runs earlier, fixed it.</p>
+
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Run</th><th>New crash report?</th></tr></thead>
+    <tbody>
+      <tr><td>unpatched baseline</td><td><strong>yes</strong></td></tr>
+      <tr><td>guard after <code>uvicorn.run()</code></td><td><strong>yes</strong></td></tr>
+      <tr><td>guard at end of lifespan shutdown</td><td>no</td></tr>
+      <tr><td>repeat &times;2</td><td>no, no</td></tr>
+      <tr><td><code>Ctrl+C</code> via the wrapper script</td><td>no</td></tr>
+      <tr><td><code>SIGHUP</code> (closing the Terminal window)</td><td>no</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The absence of a new <code>.ips</code> file is the whole test, and a better one than watching the exit code &mdash; the shell prints <code>segmentation fault</code> for a signal the process may have survived logically. The one <code>atexit</code> handler vllm-mlx owns, temp-file cleanup, is called explicitly before the exit; <code>Cleaned up 1 temp files</code> in the log confirms it still runs.</p>
+
+  <div class="callout warn"><strong>The lesson is cheaper than the bug: check <code>~/Library/Logs/DiagnosticReports/</code> first.</strong> Six reports with a complete symbolicated stack sat there through an entire debugging session, while the write-up said &ldquo;not diagnosed.&rdquo;</div>
+</section>
+
+<section>
   <h2>What we did <em>not</em> port, and why that mattered most</h2>
 
   <p>A parallel llama.cpp session had fixed two genuine video bugs and offered them for porting:</p>
@@ -655,9 +702,11 @@ out.release()</code></pre>
 cd vllm-mlx
 git checkout fix/video-silently-dropped</code></pre>
 
-  <p>Six commits, each self-contained:</p>
+  <p>Eight commits, each self-contained:</p>
 
-<pre><code>8d174bf  Stop replaying historical media in Gradio chat
+<pre><code>dc1ca3d  docs: document VLLM_MLX_CLEAN_EXIT
+7f0200f  fix(shutdown): exit the serve process before MLX's TLS teardown crashes
+8d174bf  Stop replaying historical media in Gradio chat
 59e9110  fix(video): honor enable_thinking on the native video path
 d921030  fix(chat-ui): surface attachments the server dropped
 1a0d5a5  fix(video): port the native video path to the mlx-vlm 0.6 API
@@ -705,7 +754,7 @@ print("with video:", ask([
 
   <p>Two things I have not resolved, stated plainly rather than left for someone to trip over.</p>
 
-  <p><strong>A shutdown segfault after video requests.</strong> Exiting the server cleanly after processing video produces a segfault during interpreter teardown, after <code>Application shutdown complete</code>. A text-only model exits cleanly (status 0); the same 27B VLM with only text requests also exits cleanly. So it correlates with the video path, but the decisive test &mdash; 27B, one video request, then SIGINT with a fault handler attached &mdash; was never run. It is post-shutdown, so nothing in flight is at risk, but it is unexplained.</p>
+  <p><strong>No standalone reproducer for the MLX bug.</strong> The workaround in Bug 06 is verified, but the underlying defect belongs upstream in MLX and I cannot yet reduce it to a small script. <code>mx.compile</code> on a worker thread that then exits &mdash; the obvious candidate, and three variants of it, including one that binds a per-thread GPU stream and keeps a live array &mdash; all exit cleanly. Until it reproduces in isolation I have not filed it: a bug report that doesn't reproduce costs a maintainer a day and teaches them nothing.</p>
 
   <p><strong>Per-video sampling rate with multiple clips.</strong> When a request carries more than one video, the first clip&rsquo;s sampled fps is applied to all of them, because <code>mlx_vlm.prepare_inputs</code> takes a single scalar <code>fps</code>. That value drives Qwen&rsquo;s interleaved timestamp tokens, so the second clip&rsquo;s frames get labelled using the first clip&rsquo;s rate. Small when the sources have similar frame rates; wrong in principle. Fixing it means calling the processor directly instead of routing through <code>mlx_vlm.generate</code>.</p>
 </section>
@@ -713,7 +762,7 @@ print("with video:", ask([
 <section>
   <h2>The pattern</h2>
 
-  <p>Five of the six bugs shared one shape: <strong>an allow-list, a lookup, or a keyword that didn&rsquo;t recognize valid input, and no error anywhere.</strong></p>
+  <p>Five of the seven bugs shared one shape: <strong>an allow-list, a lookup, or a keyword that didn&rsquo;t recognize valid input, and no error anywhere.</strong></p>
 
   <ul>
     <li>A MIME allow-list without <code>video/quicktime</code> (llama.cpp, same week)</li>
@@ -726,6 +775,8 @@ print("with video:", ask([
   <p>Every one returned HTTP 200 with a coherent answer. Not a single one raised. And in every case the model got blamed for a plumbing failure &mdash; which is the expensive part, because you can burn days tuning prompts against a pipeline that discarded your input before inference began.</p>
 
   <p>Multimodal pipelines have many places to drop a payload and very few places that complain. So assert on the artifact, not on the absence of an exception. Count the frames. Look at the frame. And when in doubt, send the same prompt twice and diff the token count.</p>
+
+  <p>The seventh bug was the mirror image, and worth keeping in view for balance: a segfault &mdash; the loudest failure mode a process has &mdash; which cost nothing at all, because it fired after the last request was served. Six failures that looked like success, one success that looked like failure. Neither is legible from the outside, which is the argument for measuring the artifact rather than reading the vibe of the output.</p>
 </section>
 
 <section class="appendix">
