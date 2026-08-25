@@ -27,6 +27,13 @@ Fixes live on branch
 and are proposed upstream as
 [PR #733](https://github.com/waybarrios/vllm-mlx/pull/733).
 
+On mobile, browse the code at
+[`dc1ca3d`](https://github.com/sbayer2/vllm-mlx/tree/dc1ca3d) or read
+[the diff in PR #733](https://github.com/waybarrios/vllm-mlx/pull/733/files)
+instead: `tree/fix/video-silently-dropped` is ambiguous between the branch and a
+`video-silently-dropped` path inside a branch named `fix`. The web UI resolves that
+against the ref list; the GitHub mobile app reports "something went wrong".
+
 | # | Fix | Was |
 |---|---|---|
 | 1 | `is_mllm_model()` reads `config.json` for HF repo IDs, not just local dirs | A model declaring `vision_config` + `video_token_id` loaded text-only because its *name* matched no pattern; media parts were silently dropped |
