@@ -13,6 +13,50 @@
 
 ---
 
+## About this fork
+
+This fork of [waybarrios/vllm-mlx](https://github.com/waybarrios/vllm-mlx) fixes a
+chain of failures that made **video requests unusable**. Every one of them returned
+HTTP 200 with a fluent answer rather than an error, so the model got blamed for what
+was a plumbing problem. The symptom that started it: a 22 MB video attachment cost
+*exactly* as many prompt tokens as sending no video at all (68 both times), and the
+model politely explained that no video had been attached.
+
+Fixes live on branch
+[`fix/video-silently-dropped`](https://github.com/sbayer2/vllm-mlx/tree/fix/video-silently-dropped)
+and are proposed upstream as
+[PR #733](https://github.com/waybarrios/vllm-mlx/pull/733).
+
+| # | Fix | Was |
+|---|---|---|
+| 1 | `is_mllm_model()` reads `config.json` for HF repo IDs, not just local dirs | A model declaring `vision_config` + `video_token_id` loaded text-only because its *name* matched no pattern; media parts were silently dropped |
+| 2 | Native video ported to the mlx-vlm 0.6 API (`load_video` + `generate(video=...)`) | `mlx_vlm.video_generate` was deleted upstream → `ModuleNotFoundError` → HTTP 500 on every video request |
+| 3 | `assert_video_decoded()`, MIME→container map, media errors raised not logged | A zero-frame decode was a valid return value; `video/quicktime` produced a `.quicktime` temp file |
+| 4 | Chat UI resolves file types strictly and warns on dropped attachments | Unknown extensions silently became `image/jpeg` |
+| 5 | `enable_thinking` forwarded on the native video path | `--default-chat-template-kwargs '{"enable_thinking": false}'` worked for text and images, was ignored for video, and the model reasoned until the request timed out |
+| 6 | Chat UI stops replaying historical media each turn | Payload grew 22 MB → 66 MB over three turns, re-decoding every prior video |
+| 7 | Serve process exits before MLX's thread-local compile cache tears down | Segfault on every shutdown that had served video (`EXC_BAD_ACCESS at 0x350`) |
+
+**Result on an 8s 2604×2160 HEVC `.mov` from an iPhone:** prompt tokens 68 → 12,110,
+and the model correctly describes the clip.
+
+Two findings from the work that apply to any Qwen3-VL-class model, not just this
+fork:
+
+- **The model sees temporal *pairs*, not frames.** `temporal_patch_size: 2` fuses
+  adjacent frames into one slot, so 16 frames arrive as 8. Fed a clip with numbers
+  burned in, the model read `2, 3, 5, 90, 12, 13, 16` — and `90` is 9 and 10
+  superimposed.
+- **Frames are nearly free; resolution is the budget.** `prompt_tokens ≈
+  total_pixels ÷ 2048`, capped by the processor's `max_pixels`. A 4K clip saturates
+  the cap at any frame count and gets downscaled anyway.
+
+Full write-up, including a five-minute quickstart for `.mov` handling and reasoning
+delays on any MLX server: [`artifacts/`](artifacts/).
+
+macOS launcher scripts (`scripts/macos/`) start the server and chat UI in separate
+Terminal windows, wait for each to be ready, and open the browser.
+
 ## What is vllm-mlx?
 
 A vLLM-style inference server for Apple Silicon Macs. Unlike `Ollama` or `mlx-lm` used directly, it ships **continuous batching, paged KV cache, prefix caching, and SSD-tiered cache**, and exposes **both OpenAI `/v1/*` and Anthropic `/v1/messages`** from a single process. Run LLMs, vision models, audio, and embeddings on Metal with unified memory, no conversion step.

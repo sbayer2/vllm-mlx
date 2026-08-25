@@ -1,0 +1,961 @@
+<title>I Don't See Any Video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600;6..72,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:      #f7f8f6;
+    --surface:    #ffffff;
+    --sunken:     #eef1ee;
+    --ink:        #16211f;
+    --ink-soft:   #33423f;
+    --muted:      #5c6a67;
+    --faint:      #8a9793;
+    --rule:       #dde2df;
+    --rule-firm:  #c3ccc8;
+    --accent:     #2f7d6b;
+    --accent-dim: #dcebe6;
+    --warn:       #a86414;
+    --warn-dim:   #f7ecdb;
+
+    --display: "Newsreader", Georgia, "Times New Roman", serif;
+    --body:    "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --measure: 66ch;
+    --step--1: 0.833rem;
+    --step-0:  1.0625rem;
+    --step-1:  1.32rem;
+    --step-2:  1.65rem;
+    --step-3:  2.15rem;
+    --step-4:  2.9rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0f1513;
+      --surface:    #161e1c;
+      --sunken:     #1b2422;
+      --ink:        #e7ece9;
+      --ink-soft:   #c8d2ce;
+      --muted:      #94a29e;
+      --faint:      #6d7b77;
+      --rule:       #263230;
+      --rule-firm:  #35443f;
+      --accent:     #6fc0aa;
+      --accent-dim: #1d2f2a;
+      --warn:       #d99a4e;
+      --warn-dim:   #2c2418;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0f1513;
+    --surface:    #161e1c;
+    --sunken:     #1b2422;
+    --ink:        #e7ece9;
+    --ink-soft:   #c8d2ce;
+    --muted:      #94a29e;
+    --faint:      #6d7b77;
+    --rule:       #263230;
+    --rule-firm:  #35443f;
+    --accent:     #6fc0aa;
+    --accent-dim: #1d2f2a;
+    --warn:       #d99a4e;
+    --warn-dim:   #2c2418;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: var(--step-0);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--measure);
+    margin: 0 auto;
+    padding: clamp(2.5rem, 6vw, 5rem) clamp(1.25rem, 5vw, 2rem) 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+
+  /* ---------- masthead ---------- */
+
+  header { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: var(--step-4);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .dek {
+    font-family: var(--display);
+    font-size: var(--step-1);
+    line-height: 1.45;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+    margin: 0;
+  }
+
+  .byline {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 0.75rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+
+  /* ---------- structure ---------- */
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: var(--step-3);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 2rem 0 0;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: var(--step-1);
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 1rem 0 0;
+  }
+
+  .bugno {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--warn);
+    margin: 2.5rem 0 -0.65rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .bugno::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule-firm);
+  }
+  .bugno + h2 { margin-top: 0; }
+
+  p { margin: 0; text-wrap: pretty; }
+
+  a { color: var(--accent); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  strong { font-weight: 600; }
+
+  blockquote {
+    margin: 0;
+    padding: 0.15rem 0 0.15rem 1.25rem;
+    border-left: 3px solid var(--rule-firm);
+    font-family: var(--display);
+    font-size: var(--step-1);
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+
+  ul { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  li::marker { color: var(--faint); }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 1.5rem 0;
+  }
+
+  /* ---------- code + logs ---------- */
+
+  pre {
+    margin: 0;
+    background: var(--sunken);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule-firm);
+    border-radius: 3px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    line-height: 1.6;
+    color: var(--ink-soft);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--sunken);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* ---------- the thesis figure ---------- */
+
+  .ab {
+    border: 1px solid var(--rule-firm);
+    border-radius: 3px;
+    background: var(--surface);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+  }
+
+  .ab-title {
+    font-family: var(--mono);
+    font-size: var(--step--1);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .ab-row { display: flex; align-items: baseline; gap: 1rem; }
+
+  .ab-label {
+    font-family: var(--body);
+    font-size: var(--step--1);
+    color: var(--muted);
+    flex: 0 0 11ch;
+  }
+
+  .ab-bar {
+    height: 0.6rem;
+    background: var(--accent);
+    border-radius: 1px;
+    min-width: 2px;
+  }
+  .ab-bar.void { background: var(--warn); }
+
+  .ab-num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: var(--step-0);
+    white-space: nowrap;
+  }
+
+  .ab-note {
+    font-size: var(--step--1);
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 0.9rem;
+  }
+
+  /* ---------- tables ---------- */
+
+  .scroll { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: var(--step--1);
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.9rem 0.6rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom-color: var(--rule-firm);
+    white-space: nowrap;
+  }
+
+  td.num, th.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    padding-right: 0;
+  }
+
+  td.mono { font-family: var(--mono); font-size: 0.82rem; }
+
+  /* ---------- callout ---------- */
+
+  .callout {
+    background: var(--accent-dim);
+    border-radius: 3px;
+    padding: 1.15rem 1.35rem;
+    font-size: var(--step-0);
+  }
+
+  .callout.warn { background: var(--warn-dim); }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-size: var(--step--1);
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* ---------- print ---------- */
+
+  @media print {
+    :root {
+      --paper: #ffffff; --surface: #ffffff; --sunken: #f4f4f4;
+      --ink: #000000; --ink-soft: #1a1a1a; --muted: #444444;
+      --rule: #cccccc; --rule-firm: #999999;
+      --accent: #1d5a4c; --warn: #7a4708;
+      --accent-dim: #f2f2f2; --warn-dim: #f2f2f2;
+    }
+    body { font-size: 10.5pt; line-height: 1.5; }
+    .wrap { max-width: none; padding: 0; gap: 1.25rem; }
+    h1 { font-size: 24pt; }
+    h2 { font-size: 15pt; margin-top: 1.25rem; }
+    h3 { font-size: 12pt; }
+    pre { font-size: 8.5pt; white-space: pre-wrap; word-break: break-word; }
+    h2, h3, .bugno { break-after: avoid; }
+    pre, table, .ab, .callout { break-inside: avoid; }
+    a { color: inherit; text-decoration: underline; }
+    a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 8pt; color: #555; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="kicker">Post-mortem / Local multimodal inference</div>
+  <h1>&ldquo;I don&rsquo;t see any video&rdquo;</h1>
+  <p class="dek">Six bugs sat between a 27B vision-language model and an 8-second iPhone clip. Every one of them returned HTTP 200 with a confident, fluent answer. One token count found them all.</p>
+  <div class="byline">
+    <span>vllm-mlx 0.4.1</span>
+    <span>mlx-vlm 0.6.15</span>
+    <span>Qwen3.8-27B-4bit</span>
+    <span>Apple Silicon</span>
+  </div>
+</header>
+
+<section>
+  <p>I asked a 27-billion-parameter vision-language model, running locally on a Mac, to describe an 8-second video of someone playing a guitar. It replied:</p>
+
+  <blockquote>I don&rsquo;t see any video or attachment in this conversation, so I can&rsquo;t describe its objects or colors.</blockquote>
+
+  <p>HTTP 200. No errors in the log. A fluent, confident, entirely reasonable answer.</p>
+
+  <p>The model was telling the truth. The video had been accepted, base64-decoded, parsed into a <code>video_url</code> content part &mdash; and then silently discarded before it ever reached the model. Fixing that turned up five more bugs stacked behind it, each of which also returned HTTP 200 and a plausible-sounding answer.</p>
+
+  <p>This is a walkthrough of all six, the one measurement that found every one of them, and two things I learned about what these models actually receive when you feed them a video.</p>
+</section>
+
+<section>
+  <h2>The measurement that finds all of them</h2>
+
+  <p>Start here, because it makes everything else cheap.</p>
+
+  <p>When a multimodal request goes wrong, the failure is almost always indistinguishable from the model just being bad at the task. The answer comes back well-formed. Nothing throws. You end up tuning prompts against a pipeline that dropped your attachment three layers ago.</p>
+
+  <p>There is one number that separates the two cases and requires no ground truth: <strong>send the same prompt twice &mdash; once with the attachment, once without &mdash; and compare <code>prompt_tokens</code>.</strong></p>
+
+  <figure class="ab">
+    <div class="ab-title">Same prompt, same server, before the fix</div>
+    <div class="ab-row">
+      <span class="ab-label">text only</span>
+      <span class="ab-bar void" style="width: 4px;"></span>
+      <span class="ab-num">68</span>
+    </div>
+    <div class="ab-row">
+      <span class="ab-label">+ 22 MB video</span>
+      <span class="ab-bar void" style="width: 4px;"></span>
+      <span class="ab-num">68</span>
+    </div>
+    <div class="ab-title" style="margin-top:0.4rem;">After the fix</div>
+    <div class="ab-row">
+      <span class="ab-label">+ 22 MB video</span>
+      <span class="ab-bar" style="width: min(60%, 22rem);"></span>
+      <span class="ab-num">12,110</span>
+    </div>
+    <figcaption class="ab-note">A video that reaches the model costs thousands of prompt tokens. Identical counts &mdash; and byte-identical replies &mdash; mean the attachment never arrived, whatever the answer claims.</figcaption>
+  </figure>
+
+  <p>That single comparison converts &ldquo;the model can&rsquo;t see it&rdquo; into &ldquo;the model never got it,&rdquo; and it takes ten seconds. Every bug below was found or confirmed with it.</p>
+
+  <p class="ab-note" style="border:0;padding:0;">Credit where due: this diagnostic came from a parallel debugging session on llama.cpp, which hit the same class of failure from a completely different direction.</p>
+</section>
+
+<section>
+  <div class="bugno">Bug 01</div>
+  <h2>A capability allow-list that guessed from the filename</h2>
+
+  <p>The server log had already said it, one line, an hour before anyone read it carefully:</p>
+
+<pre><code>SimpleEngine loaded: mlx-community/Qwen3.8-27B-4bit (MLLM=False)</code></pre>
+
+  <p><code>MLLM=False</code>. The model had loaded as a <strong>text-only LLM</strong>. Multimodal content parts were being flattened out of every request as a matter of course.</p>
+
+<pre><code>def is_mllm_model(model_name: str) -&gt; bool:
+    config = _try_read_config_json(model_name)   # local DIRECTORIES only
+    if config is not None:
+        return _config_indicates_vlm(config)
+    return _check_legacy_string_patterns(model_name)   # substring match on the NAME</code></pre>
+
+  <p><code>_try_read_config_json</code> returns <code>None</code> unless the argument resolves to a local directory. A HuggingFace repo ID is not a directory. So detection fell through to matching the <em>name</em> against a hardcoded list &mdash; <code>"-VL-"</code>, <code>"llava"</code>, <code>"gemma3"</code>, <code>"qwen3_5"</code>. <code>"mlx-community/Qwen3.8-27B-4bit"</code> matches none of them.</p>
+
+  <p>Meanwhile the model&rsquo;s own <code>config.json</code> says, unambiguously:</p>
+
+<pre><code>{
+  "architectures": ["Qwen3_5ForConditionalGeneration"],
+  "image_token_id": 248056,
+  "video_token_id": 248057,
+  "vision_config": { "model_type": "qwen3_5" }
+}</code></pre>
+
+  <p>And that file was sitting in the local HuggingFace cache the entire time, one call away:</p>
+
+<pre><code>from huggingface_hub import try_to_load_from_cache
+try_to_load_from_cache(repo_id, "config.json")   # no network, returns the path</code></pre>
+
+  <div class="callout"><strong>Prefer the declared capability over the inferred one.</strong> The fix reads <code>config.json</code> for repo IDs as well as local paths, and demotes name-pattern matching to what it should always have been &mdash; the fallback for a model that hasn&rsquo;t been downloaded yet.</div>
+
+  <p>This matters beyond one model. Auditing every model in one machine&rsquo;s HF cache, six of twenty-five flipped from <code>False</code> to <code>True</code>, and every one was genuinely multimodal:</p>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Architecture</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="mono">Qwen3.8-27B-4bit</td><td class="mono">Qwen3_5ForConditionalGeneration</td></tr>
+      <tr><td class="mono">Qwen3.6-27B-4bit</td><td class="mono">Qwen3_5ForConditionalGeneration</td></tr>
+      <tr><td class="mono">Qwen3.6-35B-A3B-4bit</td><td class="mono">Qwen3_5MoeForConditionalGeneration</td></tr>
+      <tr><td class="mono">Qwen3.6-35B-A3B-OptiQ-4bit</td><td class="mono">Qwen3_5MoeForConditionalGeneration</td></tr>
+      <tr><td class="mono">Qwen3-Omni-30B-A3B-Instruct-4bit</td><td class="mono">Qwen3OmniMoeForConditionalGeneration</td></tr>
+      <tr><td class="mono">Muse-Glimmer-30B-4bit</td><td class="mono">MuseGlimmerForConditionalGeneration</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Nothing flipped the other way; no text-only model carries a stray vision key. Six models mis-served on one laptop, all of them recent. Naming conventions drift; <code>config.json</code> doesn&rsquo;t.</p>
+</section>
+
+<section>
+  <div class="bugno">Bug 02</div>
+  <h2>The upstream module had been deleted</h2>
+
+  <p>With detection fixed, the same request went from a silent lie to a loud error:</p>
+
+<pre><code>ModuleNotFoundError: No module named 'mlx_vlm.video_generate'</code></pre>
+
+  <p>HTTP 500. That is <em>progress</em> &mdash; a wrong answer replaced by an honest failure &mdash; but it isn&rsquo;t working video.</p>
+
+  <p>vllm-mlx&rsquo;s native video path imported two things from <code>mlx_vlm.video_generate</code>. In mlx-vlm 0.6.x that module no longer exists; the layout is <code>mlx_vlm.generate.*</code> now, and <code>process_vision_info</code> was removed entirely. Any model with a <code>video_token_id</code> &mdash; every Qwen3-VL-class model &mdash; took this path and hit the wall.</p>
+
+<pre><code>from mlx_vlm.utils import load_video          # decode
+from mlx_vlm.generate import generate         # generate(video=[...])
+
+frames, sample_fps = load_video(
+    path, fps=video_fps, max_frames=video_max_frames,
+    min_frames=MIN_FRAMES, frame_factor=FRAME_FACTOR,
+)</code></pre>
+
+  <p>One deliberate choice: decode in vllm-mlx rather than handing <code>generate()</code> a path. First, <code>video_max_frames</code> gets honored &mdash; upstream&rsquo;s default cap is <strong>768 frames</strong>, and a five-minute clip at 2 fps would try 600 frames, roughly 450,000 prompt tokens. Second, having the frames in hand means they can be validated before they reach the model.</p>
+
+  <p>If the native path is unavailable, the request now falls back to frames-as-images instead of raising. That fallback is a working substitute, not an equivalent one &mdash; stills go through the image encoder rather than the model&rsquo;s temporal 3D convolution, so token cost per frame, effective resolution and motion tracking all differ. It logs a warning saying exactly that, because two paths that produce different stimuli should never be silently interchanged.</p>
+
+  <p>Result: <strong>68 &rarr; 12,110 prompt tokens</strong>, and a correct description of the clip.</p>
+</section>
+
+<section>
+  <div class="bugno">Bug 03</div>
+  <h2>Everything that could fail quietly</h2>
+
+  <p>Three more places where a media failure produced no signal.</p>
+
+  <p><strong>The frame sampler returned whatever it got.</strong> Frame-index seeking can silently skip frames on long-GOP codecs like HEVC, and an empty list was a perfectly valid return value &mdash; the request then ran with no visual input at all.</p>
+
+<pre><code>def assert_video_decoded(frames, video_path, *, height_axis=0, width_axis=1):
+    if len(frames) == 0:
+        raise ValueError(
+            f"Decoded 0 frames from {video_path}. The container or codec could "
+            "not be read - this is a decode failure, not a model failure."
+        )</code></pre>
+
+  <p>That last clause is the point. The error names the layer, so the next person doesn&rsquo;t spend an afternoon blaming the model. It also logs the successful case &mdash; <code>Video decode OK: 16 frames, 2160x2604</code> &mdash; which makes frame count and orientation visible in the log instead of merely inferable.</p>
+
+  <p><strong>The multimodal processor caught every media exception and continued.</strong> <code>logger.warning</code> and carry on, producing a request with no media and a confident answer about nothing. Now it raises. A 4xx or 5xx naming the real cause is worth far more than a plausible 200.</p>
+
+  <p><strong>The temp-file suffix was built by string-splitting the MIME type.</strong> <code>mime.split("/")[-1]</code> turns <code>video/quicktime</code> into <code>.quicktime</code> and <code>video/x-matroska</code> into <code>.x-matroska</code>. FFmpeg content-sniffs, so OpenCV opened these anyway &mdash; I verified <code>.quicktime</code>, <code>.mov</code> and no suffix at all decode identically. Latent, not live. Fixed regardless, with a real MIME&rarr;container map, because decoders like PyAV and decord infer the container from the extension and this becomes live the moment anyone swaps the backend.</p>
+</section>
+
+<section>
+  <div class="bugno">Bug 04</div>
+  <h2>The UI could show you a chip for a file it had thrown away</h2>
+
+  <p>Unknown file extensions <strong>defaulted to <code>image/jpeg</code></strong>. A mislabeled video is rejected or misread server-side, and the guess hides the real problem. Resolution is now by extension, then the system MIME database, then an exception. The tables gained <code>.mov</code> / <code>video/quicktime</code> &mdash; what an iPhone produces and what browsers report for it &mdash; plus <code>.m4v</code>, <code>.mkv</code>, <code>.heic</code>.</p>
+
+  <p>The <code>prompt_tokens</code> check from the top of this article <strong>is now a product feature</strong>: if attachments were sent and the server reports an implausibly low prompt token count, the reply carries a visible warning naming the likely cause and how to check it.</p>
+
+  <p>And <strong>startup queries <code>/health</code></strong>, warning when the server has loaded a text-only model while the UI is in multimodal mode &mdash; the exact configuration of Bug 01, caught before the first message instead of after twenty.</p>
+</section>
+
+<section>
+  <div class="bugno">Bug 05</div>
+  <h2>A flag that worked everywhere except where you needed it</h2>
+
+  <p>Video worked. Video was also slow &mdash; and then it stopped working again:</p>
+
+<pre><code>Error: 504 Server Error: Gateway Timeout</code></pre>
+
+  <p>The model is a reasoner, so I had started it with thinking disabled server-wide via <code>--default-chat-template-kwargs '{"enable_thinking": false}'</code>. Text replies came back in under a second. Image replies, instant. Video requests reasoned for 8,192 tokens &mdash; about eight minutes at 17 tok/s &mdash; and blew through the 300-second request timeout.</p>
+
+  <p>The flag was working. It just never reached the video path: the native branch built its chat-template arguments from <code>tools</code> alone and dropped <code>enable_thinking</code> on the floor. Confirmed straight against the model&rsquo;s own template:</p>
+
+<pre><code>enable_thinking=True   -&gt;  ...&lt;|im_start|&gt;assistant\n&lt;think&gt;\n
+enable_thinking=False  -&gt;  ...&lt;|im_start|&gt;assistant\n&lt;think&gt;\n\n&lt;/think&gt;\n\n</code></pre>
+
+  <p>A pre-closed think block versus an open one. That one dropped keyword was the difference between no reasoning at all and reasoning until the token budget ran out.</p>
+
+  <div class="callout warn"><strong>A setting appears to work because the paths that honor it are the ones you test first.</strong> Text works, images work, so the flag is fine &mdash; and the one path that ignores it is the one you were actually trying to use.</div>
+
+  <p>After the fix: <strong>396 tokens in 60.8 seconds, HTTP 200.</strong></p>
+</section>
+
+<section>
+  <h2>What we did <em>not</em> port, and why that mattered most</h2>
+
+  <p>A parallel llama.cpp session had fixed two genuine video bugs and offered them for porting:</p>
+
+  <ul>
+    <li><strong>The moov atom.</strong> MP4/MOV keep their index in a <code>moov</code> atom usually written at the <em>end</em> of the file, and decoding needs a backward seek to find it. Pipe the bytes to FFmpeg and that seek fails: zero frames, no exception, HTTP 200.</li>
+    <li><strong>Rotation metadata.</strong> iPhones record landscape and attach a <code>rotation=-90</code> display matrix. The FFmpeg CLI <em>applies</em> the rotation and emits 2160&times;2604; <code>ffprobe</code> <em>reports</em> the stored 2604&times;2160. Read dimensions from one and buffers from the other and you parse the image at the wrong stride &mdash; and because a transpose preserves the byte count exactly, nothing errors. The picture shears into diagonal bands, which the model then dutifully describes as &ldquo;horizontal color bands with scanline texture.&rdquo;</li>
+  </ul>
+
+  <p>Both are real. <strong>Neither applied here, and porting the second would have broken a correct pipeline.</strong> vllm-mlx decodes with <code>cv2.VideoCapture</code> on a <em>path</em>, never a pipe, so there is no moov problem. And OpenCV 5.0.0 auto-rotates:</p>
+
+<pre><code>cap = cv2.VideoCapture("IMG_2537.mov")   # stored 2604x2160, rotation=-90
+cap.get(cv2.CAP_PROP_ORIENTATION_AUTO)   # 1.0
+ret, frame = cap.read()
+frame.shape                              # (2604, 2160, 3) - height-major, upright</code></pre>
+
+  <p>Copying llama.cpp&rsquo;s width/height swap into that would have <em>introduced</em> the exact shear it was written to remove. Two rules came out of this:</p>
+
+  <p><strong>Test before you patch.</strong> A fix is written against a specific decoder&rsquo;s behavior. The same fix applied to a decoder that behaves differently is a new bug wearing a trusted commit message.</p>
+
+  <p><strong>Look at the frame.</strong> Not the shape, not the byte count &mdash; dump it to PNG and open it. I did, saw a seafoam Stratocaster with a sun-motif strap, and knew in five seconds that the rotation path was fine. Reading the documentation would have been slower and would have given the wrong answer, because an auto-rotation default is exactly the sort of thing that changes between versions.</p>
+</section>
+
+<section>
+  <h2>What the model actually sees</h2>
+
+  <p>With the pipeline fixed, two surprises about the stimulus itself. Both are standard behavior nobody tells you about, and both change how you read a model&rsquo;s answer.</p>
+
+  <h3>It sees temporal pairs, not frames</h3>
+
+  <p>The model kept describing &ldquo;four frames,&rdquo; &ldquo;seven images,&rdquo; a &ldquo;crossfade,&rdquo; &ldquo;double exposure,&rdquo; &ldquo;重影&rdquo; (ghosting). Its frame counts were never consistent.</p>
+
+  <p>Asking a model how many images it received is not evidence. So build a stimulus where the count is <em>observable</em>: an 8-second clip at 24 fps with a large number burned in, changing every half second, 1 through 16.</p>
+
+<pre><code>import cv2, numpy as np
+W, H, FPS, SECS, n_labels = 720, 900, 24, 8, 16
+out = cv2.VideoWriter('counter.mp4', cv2.VideoWriter_fourcc(*'mp4v'), FPS, (W, H))
+total = FPS * SECS
+for i in range(total):
+    label = i // (total // n_labels) + 1
+    img = np.full((H, W, 3), 245, np.uint8)
+    cv2.putText(img, str(label), (W//2-190, H//2+130), cv2.FONT_HERSHEY_SIMPLEX,
+                9.0, (20, 20, 20), 30, cv2.LINE_AA)
+    out.write(img)
+out.release()</code></pre>
+
+  <p>Sixteen frames sampled at 2 fps. The model&rsquo;s answer:</p>
+
+  <blockquote>2, 3, 5, <strong>90</strong>, 12, 13, 16; 7 images</blockquote>
+
+  <p>Look at <code>90</code>. There is no frame labelled 90. That is <strong>9 and 10 superimposed</strong> &mdash; one fused pair, caught in the act. The other numbers are pair representatives. Drop to four frames and it collapses further: <em>&ldquo;the image shows two digits, 1 and 6.&rdquo;</em></p>
+
+  <p>The mechanism is one line in the model&rsquo;s <code>video_preprocessor_config.json</code>:</p>
+
+<pre><code>{ "temporal_patch_size": 2, "merge_size": 2, "patch_size": 16 }</code></pre>
+
+  <p>The vision encoder&rsquo;s 3D convolution fuses <strong>each adjacent pair of frames</strong> into a single temporal slot. Sixteen frames arrive as eight slots. The model isn&rsquo;t confused about your video &mdash; it is accurately describing what its own encoder hands it. Every &ldquo;double exposure&rdquo; report was that pairing, and every frame count it gave was a count of slots.</p>
+
+  <h3>Frames are nearly free; resolution is the budget</h3>
+
+  <p>The obvious assumption is that doubling the frame rate doubles the cost. Measured across both clips:</p>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th class="num">video_fps</th>
+        <th class="num">frames</th>
+        <th class="num">guitar clip 2604&times;2160</th>
+        <th class="num">counter clip 720&times;900</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="num">2.0</td><td class="num">16</td><td class="num">12,095</td><td class="num">5,025</td></tr>
+      <tr><td class="num">1.0</td><td class="num">8</td><td class="num">12,055</td><td class="num">2,561</td></tr>
+      <tr><td class="num">0.5</td><td class="num">4</td><td class="num">11,071</td><td class="num">1,329</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The counter clip scales roughly linearly. The guitar clip is <strong>flat</strong>. <code>max_pixels: 25165824</code> is a budget for the <em>entire video</em>, not per frame. A high-resolution clip saturates it at any frame count, so fewer frames simply buys more resolution per frame &mdash; 756 tokens/frame at 16 frames, 2,768 at 4. The low-resolution clip never reaches the ceiling, so it scales with frames.</p>
+
+  <p>Practically: on phone-resolution video, <strong>more frames costs almost nothing in tokens and costs spatial detail instead.</strong> When the model hedged between a Telecaster and a Stratocaster on a clip that plainly shows a double-cutaway Strat body, the fix wasn&rsquo;t a better prompt &mdash; it was <code>"video_fps": 0.5</code>, trading motion for four frames at nearly four times the detail each.</p>
+</section>
+
+<section>
+  <h2>Reproduce it</h2>
+
+<pre><code>git clone https://github.com/sbayer2/vllm-mlx.git
+cd vllm-mlx
+git checkout fix/video-silently-dropped</code></pre>
+
+  <p>Six commits, each self-contained:</p>
+
+<pre><code>8d174bf  Stop replaying historical media in Gradio chat
+59e9110  fix(video): honor enable_thinking on the native video path
+d921030  fix(chat-ui): surface attachments the server dropped
+1a0d5a5  fix(video): port the native video path to the mlx-vlm 0.6 API
+c554d3e  fix(video): fail loudly on a video that did not decode
+57c95f7  fix(detection): read config.json for HF repo IDs in is_mllm_model</code></pre>
+
+  <p>Serving, and the chat UI in a second terminal:</p>
+
+<pre><code>source ~/vllm-mlx-env/bin/activate
+
+vllm-mlx serve mlx-community/Qwen3.8-27B-4bit \
+  --served-model-name qwen --port 8000 \
+  --default-chat-template-kwargs '{"enable_thinking": false}' \
+  --timeout 900
+
+vllm-mlx-chat --server-url http://127.0.0.1:8000 \
+  --served-model-name qwen --max-tokens 8192</code></pre>
+
+  <p><code>--served-model-name</code> must match on both, or every reply is <code>Error: The model 'default' does not exist</code>.</p>
+
+  <p>And the A/B that started all of this, which you can point at any multimodal server:</p>
+
+<pre><code>import base64, requests
+
+URL = "http://localhost:8000/v1/chat/completions"
+PROMPT = "Describe exactly what you see in this video."
+
+def ask(content):
+    r = requests.post(URL, json={"model": "qwen", "max_tokens": 1,
+                                 "messages": [{"role": "user", "content": content}]})
+    return r.json()["usage"]["prompt_tokens"]
+
+b64 = base64.b64encode(open("clip.mov", "rb").read()).decode()
+print("text only:", ask(PROMPT))
+print("with video:", ask([
+    {"type": "text", "text": PROMPT},
+    {"type": "video_url", "video_url": {"url": f"data:video/quicktime;base64,{b64}"}},
+]))</code></pre>
+
+  <p>Two numbers within a few dozen of each other means your attachment is being dropped, whatever the model says in its answer.</p>
+</section>
+
+<section>
+  <h2>Still open</h2>
+
+  <p>Two things I have not resolved, stated plainly rather than left for someone to trip over.</p>
+
+  <p><strong>A shutdown segfault after video requests.</strong> Exiting the server cleanly after processing video produces a segfault during interpreter teardown, after <code>Application shutdown complete</code>. A text-only model exits cleanly (status 0); the same 27B VLM with only text requests also exits cleanly. So it correlates with the video path, but the decisive test &mdash; 27B, one video request, then SIGINT with a fault handler attached &mdash; was never run. It is post-shutdown, so nothing in flight is at risk, but it is unexplained.</p>
+
+  <p><strong>Per-video sampling rate with multiple clips.</strong> When a request carries more than one video, the first clip&rsquo;s sampled fps is applied to all of them, because <code>mlx_vlm.prepare_inputs</code> takes a single scalar <code>fps</code>. That value drives Qwen&rsquo;s interleaved timestamp tokens, so the second clip&rsquo;s frames get labelled using the first clip&rsquo;s rate. Small when the sources have similar frame rates; wrong in principle. Fixing it means calling the processor directly instead of routing through <code>mlx_vlm.generate</code>.</p>
+</section>
+
+<section>
+  <h2>The pattern</h2>
+
+  <p>Five of the six bugs shared one shape: <strong>an allow-list, a lookup, or a keyword that didn&rsquo;t recognize valid input, and no error anywhere.</strong></p>
+
+  <ul>
+    <li>A MIME allow-list without <code>video/quicktime</code> (llama.cpp, same week)</li>
+    <li>A capability check that matched on names instead of reading the declared config</li>
+    <li>An import against a module that upstream had renamed</li>
+    <li>A file-type resolver that guessed <code>image/jpeg</code> for anything it didn&rsquo;t know</li>
+    <li>A template keyword forwarded on three paths out of four</li>
+  </ul>
+
+  <p>Every one returned HTTP 200 with a coherent answer. Not a single one raised. And in every case the model got blamed for a plumbing failure &mdash; which is the expensive part, because you can burn days tuning prompts against a pipeline that discarded your input before inference began.</p>
+
+  <p>Multimodal pipelines have many places to drop a payload and very few places that complain. So assert on the artifact, not on the absence of an exception. Count the frames. Look at the frame. And when in doubt, send the same prompt twice and diff the token count.</p>
+</section>
+
+<section class="appendix">
+  <div class="kicker" style="margin-top:2.5rem;">Appendix</div>
+  <h2 style="margin-top:0.35rem;">The five-minute version</h2>
+
+  <p>Everything above is the investigation. This is the part you can act on without reading any of it.</p>
+
+  <p><strong>You&rsquo;re in the right place if</strong> you&rsquo;re running an MLX vision model behind a chat UI &mdash; LM Studio, SGLang, Open WebUI, llama.cpp&rsquo;s server, vllm-mlx&rsquo;s own &mdash; and either your <code>.mov</code> files vanish or get rejected, or a single video takes minutes to come back. Two independent problems, two fixes. Neither requires patching your server.</p>
+
+  <h3>Step 0 &mdash; Install it</h3>
+
+  <p>Apple Silicon Mac, macOS with Homebrew. <code>ffmpeg</code> is needed for the conversion in Fix 1.</p>
+
+<pre><code>brew install python@3.12 ffmpeg
+
+python3 -m venv ~/vllm-mlx-env
+source ~/vllm-mlx-env/bin/activate
+pip install --upgrade pip</code></pre>
+
+  <p>Then install vllm-mlx. <strong>Pick one:</strong></p>
+
+<pre><code># (a) The PyPI release - does NOT contain the video fixes in this article
+pip install vllm-mlx
+
+# (b) The patched branch - video actually works
+pip install "vllm-mlx @ git+https://github.com/sbayer2/vllm-mlx.git@fix/video-silently-dropped"</code></pre>
+
+  <p>Everything else comes along automatically: <code>mlx</code>, <code>mlx-vlm</code>, <code>opencv-python</code>, <code>transformers</code>, <code>gradio</code> and <code>fastapi</code> are all hard dependencies, so there are no extras to remember. Python 3.10 or newer is required. Verify with <code>pip show vllm-mlx</code> and <code>vllm-mlx --help</code>.</p>
+
+  <div class="callout"><strong>Hardware.</strong> <code>Qwen3.8-27B-4bit</code> is roughly a 15 GB download and holds about 16 GB resident once loaded &mdash; it wants 32 GB of unified memory to be comfortable and 64 GB to leave room for anything else. On a smaller machine use the model from vllm-mlx&rsquo;s own docs, <code>mlx-community/Qwen3-VL-4B-Instruct-3bit</code>, and substitute it everywhere below. The first <code>serve</code> downloads the weights automatically; later starts read the HuggingFace cache and take about a minute.</div>
+
+  <h3>Step 1 &mdash; Run it</h3>
+
+  <p><strong>Terminal 1 &mdash; the server:</strong></p>
+
+<pre><code>source ~/vllm-mlx-env/bin/activate
+
+vllm-mlx serve mlx-community/Qwen3.8-27B-4bit \
+  --served-model-name qwen --port 8000 \
+  --default-chat-template-kwargs '{"enable_thinking": false}' \
+  --timeout 900</code></pre>
+
+  <p>Wait for <code>Uvicorn running on http://127.0.0.1:8000</code>. Roughly a minute to load ~16 GB.</p>
+
+  <p><strong>Terminal 2 &mdash; the chat UI:</strong></p>
+
+<pre><code>source ~/vllm-mlx-env/bin/activate
+
+vllm-mlx-chat --server-url http://127.0.0.1:8000 \
+  --served-model-name qwen --max-tokens 8192</code></pre>
+
+  <p>Then open <strong>http://127.0.0.1:7860</strong>.</p>
+
+  <p>Three things that will bite you if you skip them:</p>
+
+  <ul>
+    <li><strong><code>--served-model-name</code> must match on both commands.</strong> Mismatch it and every reply is <code>Error: The model 'default' does not exist. Available model: 'qwen'</code>.</li>
+    <li><strong><code>--default-chat-template-kwargs '{"enable_thinking": false}'</code></strong> is what keeps a video reply near a minute instead of eight (Fix 3).</li>
+    <li><strong>Type a question alongside the attachment.</strong> An empty textbox sends the clip with no text part, and the model &mdash; having no language cue &mdash; is liable to answer in Chinese.</li>
+  </ul>
+
+  <p>Two commands worth knowing when something looks wrong:</p>
+
+<pre><code>curl -s localhost:8000/health          # model_type should say "mllm", not "llm"
+curl -s localhost:8000/v1/models       # the id here is your --served-model-name</code></pre>
+
+  <h3>Fix 1 &mdash; Convert the clip once. It solves four things at once.</h3>
+
+<pre><code>ffmpeg -i IMG_2537.mov \
+  -vf scale=-2:720 \
+  -c:v libx264 -pix_fmt yuv420p \
+  -movflags +faststart \
+  -an \
+  clip.mp4</code></pre>
+
+  <p>On the test clip: <strong>16.7 MB &rarr; 1.25 MB</strong>, and <code>ffprobe</code> now reports <code>598x720</code>, <code>h264</code>, with no rotation side data at all. Each flag is doing specific work:</p>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr><th>Flag</th><th>What it fixes</th><th>Section</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="mono">.mp4 + libx264</td>
+        <td>UI MIME allow-lists that omit <code>video/quicktime</code>, and decoders without HEVC</td>
+        <td>Bug 04</td>
+      </tr>
+      <tr>
+        <td class="mono">-movflags +faststart</td>
+        <td>Moves the <code>moov</code> atom to the <strong>front</strong> of the file, so decoders reading from a pipe can find the index without seeking backwards</td>
+        <td>Did not port</td>
+      </tr>
+      <tr>
+        <td class="mono">-vf scale=-2:720</td>
+        <td>Physically applies the rotation and drops the display matrix, so a decoder that ignores rotation metadata can&rsquo;t shear the frame &mdash; and cuts the token cost</td>
+        <td>Did not port</td>
+      </tr>
+      <tr>
+        <td class="mono">-an</td>
+        <td>Drops the audio track, which non-omni models ignore anyway</td>
+        <td>&mdash;</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>If your only problem is the container and you want full resolution, remux losslessly instead &mdash; no re-encode, near-instant:</p>
+
+<pre><code>ffmpeg -i IMG_2537.mov -c copy -movflags +faststart clip.mp4</code></pre>
+
+  <p>That keeps the HEVC video and the rotation metadata, so it fixes the MIME and moov problems but not the codec or rotation ones.</p>
+
+  <h3>Fix 2 &mdash; Understand what you&rsquo;re paying for, then pay less</h3>
+
+  <p>For Qwen3-VL-class models the prompt cost has a closed form:</p>
+
+<pre><code>prompt_tokens  ≈  total_pixels ÷ 2048
+                  where total_pixels = frames × width × height
+                  capped at max_pixels ÷ 2048</code></pre>
+
+  <p>The <code>÷ 2048</code> is <code>patch_size² × merge_size² × temporal_patch_size</code> = <code>16² × 2² × 2</code>. The cap comes from your model&rsquo;s <code>video_preprocessor_config.json</code> &mdash; for Qwen3.8-27B, <code>max_pixels: 25165824</code>, so <strong>12,288 tokens is the ceiling no matter what you send</strong>. Measured on the same server, same model, same 16 frames:</p>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Clip</th>
+        <th class="num">Resolution</th>
+        <th class="num">Pixels</th>
+        <th class="num">Predicted</th>
+        <th class="num">Measured</th>
+        <th class="num">Wall time</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>original <code>.mov</code></td>
+        <td class="num">2604&times;2160</td>
+        <td class="num">90M &rarr; capped 25.2M</td>
+        <td class="num">12,288</td>
+        <td class="num">12,110</td>
+        <td class="num">60.8 s</td>
+      </tr>
+      <tr>
+        <td>converted <code>.mp4</code></td>
+        <td class="num">598&times;720</td>
+        <td class="num">6.9M</td>
+        <td class="num">3,364</td>
+        <td class="num"><strong>3,359</strong></td>
+        <td class="num"><strong>10.6 s</strong></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Prediction and measurement agree to within 5 tokens, and the wall time is <strong>6&times; faster</strong> for the same 16 frames of the same video &mdash; because video latency here is dominated by prefill, not generation.</p>
+
+  <div class="callout">A 4K phone clip saturates the pixel budget and gets <em>silently downscaled by the processor anyway</em>. You are not gaining detail by sending it &mdash; you&rsquo;re paying full prefill for pixels that get thrown away. Downscale it yourself and choose where the savings go.</div>
+
+  <p>Rules of thumb for a 16-frame sample:</p>
+
+  <ul>
+    <li>Below about <strong>1.57 MP per frame</strong> (~1620&times;970) you&rsquo;re under the cap, paying only for what you send.</li>
+    <li>Above it you&rsquo;re at the ceiling regardless, so a bigger file buys nothing.</li>
+    <li>Want fine detail instead of motion? Send <strong>fewer frames</strong> (<code>video_fps: 0.5</code>), not a bigger file &mdash; four frames at the same budget get ~2,768 tokens each instead of ~756.</li>
+  </ul>
+
+  <h3>Fix 3 &mdash; Stop the model reasoning for eight minutes</h3>
+
+  <p>Qwen3.5/3.8 are reasoning models. Left alone, a video request will spend its entire <code>max_tokens</code> budget inside <code>&lt;think&gt;</code> before writing a word of answer &mdash; at 17 tok/s that is about eight minutes for an 8,192-token budget, and on many servers it trips a 300-second gateway timeout first. Three ways to stop it, in order of preference.</p>
+
+  <p><strong>Server-wide</strong>, if you control the launch command:</p>
+
+<pre><code>vllm-mlx serve mlx-community/Qwen3.8-27B-4bit \
+  --served-model-name qwen --port 8000 \
+  --default-chat-template-kwargs '{"enable_thinking": false}' \
+  --timeout 900</code></pre>
+
+  <p><strong>Per request</strong>, which works from any UI that lets you add fields to the JSON body:</p>
+
+<pre><code>{
+  "model": "qwen",
+  "messages": [ ... ],
+  "chat_template_kwargs": { "enable_thinking": false }
+}</code></pre>
+
+  <p>Measured on the converted clip: 3,366 prompt tokens, <strong>40 completion tokens, 10.6 seconds</strong>, and a correct one-sentence answer naming the double-cutaway body, three single-coil pickups and white pickguard.</p>
+
+  <p><strong>Capped</strong>, if your UI can do neither and you just want a ceiling on the reasoning: <code>--default-thinking-token-budget 256</code>.</p>
+
+  <p>Two traps worth knowing:</p>
+
+  <ul>
+    <li><strong><code>/no_think</code> in the prompt does not work for this model.</strong> That convention comes from earlier Qwen releases; the string appears zero times in Qwen3.8&rsquo;s chat template, so it is read as literal text.</li>
+    <li><strong>On vllm-mlx you need the Bug 05 fix for any of this to apply to <em>video</em>.</strong> Before that commit, <code>enable_thinking</code> reached text and image requests and was dropped on the video path &mdash; so the flag looks like it&rsquo;s working right up until you attach a clip.</li>
+  </ul>
+
+  <h3>Fix 4 &mdash; Confirm it before you tune anything</h3>
+
+  <p>Whatever server you&rsquo;re on, run the A/B from &ldquo;Reproduce it&rdquo; before you touch a prompt. It is the same ten-second check that found every bug in this article, and it works against any OpenAI-compatible endpoint. What healthy looks like, on the converted clip:</p>
+
+<pre><code>prompt_tokens for text alone     ~50-70
+prompt_tokens with the video     3,000-12,000</code></pre>
+
+  <p>And in the server log, if you&rsquo;re on the patched vllm-mlx:</p>
+
+<pre><code>Video decode OK: 16 frames, 598x720, from /var/folders/.../tmpXXXX.mp4
+Native video: 1 video(s), 16 frames total, sampled at 1.96 fps</code></pre>
+
+  <p>Two things to read off that line. The <strong>frame count</strong> should be non-zero and roughly <code>fps × duration</code>. The <strong>dimensions</strong> should be the <em>display</em> orientation &mdash; portrait video reports a height larger than its width. If they&rsquo;re transposed, you have the rotation bug and the frames are being read at the wrong stride.</p>
+
+  <h3>If you&rsquo;re on LM Studio, SGLang, or llama.cpp</h3>
+
+  <p>The fixes in this article are vllm-mlx commits, but the failure modes aren&rsquo;t vllm-mlx-specific &mdash; they&rsquo;re what happens when a container format, a capability check and a decoder disagree. On a server you don&rsquo;t control, check in this order:</p>
+
+  <ul>
+    <li><strong>Does the UI accept the file at all?</strong> If a <code>.mov</code> disappears from the composer with no error, its allow-list is missing <code>video/quicktime</code>. Fix 1 sidesteps it entirely.</li>
+    <li><strong>Does the request carry the video?</strong> The A/B check. If prompt tokens don&rsquo;t move, stop debugging the model.</li>
+    <li><strong>Does the decoder get a path or a bytestream?</strong> Anything piping bytes to FFmpeg needs <code>+faststart</code> &mdash; which Fix 1 already did for you.</li>
+    <li><strong>Are the frames upright?</strong> Decode one frame, write it to PNG, and look at it. Byte counts survive a transpose; your eyes don&rsquo;t.</li>
+  </ul>
+
+  <p>That last one is worth repeating, because it&rsquo;s the cheapest test in this whole article and the one that settled the biggest question in it.</p>
+</section>
+
+<footer>
+  <div>Fixes: <a href="https://github.com/sbayer2/vllm-mlx">github.com/sbayer2/vllm-mlx</a>, branch <code>fix/video-silently-dropped</code>.</div>
+  <div>Upstream: <a href="https://github.com/waybarrios/vllm-mlx">waybarrios/vllm-mlx</a>.</div>
+</footer>
+
+</div>
