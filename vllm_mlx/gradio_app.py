@@ -69,7 +69,14 @@ VIDEO_TYPES = {
 # to read 9pt type: a page of text costs ~1.2k tokens and is exact, where the
 # same page rendered at 150 DPI costs ~2k tokens and invites misread digits.
 # So a PDF becomes a *text* content part, which needs no server support at all.
-DOCUMENT_TYPES = {".pdf": "application/pdf"}
+DOCUMENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument"
+        ".wordprocessingml.document"
+    ),
+}
 
 # Rough chars-per-token for English prose. Only used to warn and to trim, so an
 # approximation is fine — the server enforces the real limit.
@@ -108,50 +115,82 @@ UPLOAD_FILE_TYPES = (
 )
 
 
-def extract_document_text(file_path: str) -> str:
-    """Extract a PDF's text layer as a labelled text content part.
+def _read_document(file_path: str) -> tuple[list[str], str]:
+    """Read a document into chunks, with the name of what a chunk is.
 
-    Trims to MAX_DOCUMENT_TOKENS on a page boundary and says how many pages it
-    kept, because a document silently cut in half produces a confident answer
-    about the wrong half.
+    Chunks exist so truncation lands on a real boundary and can be reported in
+    a unit the reader recognises: pages for a PDF, paragraphs for plain text.
 
     Raises:
-        ValueError: If pdftotext is unavailable, the file cannot be read, or
-            the PDF has no text layer to extract.
+        ValueError: If the format is unsupported or the file cannot be read.
     """
-    name = Path(file_path).name
+    path = Path(file_path)
+    name, suffix = path.name, path.suffix.lower()
 
-    if shutil.which("pdftotext") is None:
-        raise ValueError(
-            f"Cannot read {name}: pdftotext is not installed. "
-            "Install it with: brew install poppler"
+    if suffix == ".pdf":
+        if shutil.which("pdftotext") is None:
+            raise ValueError(
+                f"Cannot read {name}: pdftotext is not installed. "
+                "Install it with: brew install poppler"
+            )
+        text = _run_extractor(["pdftotext", "-layout", file_path, "-"], name)
+        # pdftotext separates pages with a form feed.
+        return [p for p in text.split("\f") if p.strip()], "page"
+
+    if suffix == ".docx":
+        if shutil.which("textutil") is None:
+            raise ValueError(f"Cannot read {name}: textutil is unavailable.")
+        text = _run_extractor(
+            ["textutil", "-convert", "txt", "-stdout", file_path], name
         )
+        return [p for p in text.split("\n\n") if p.strip()], "paragraph"
 
+    if suffix == ".txt":
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Not everything is UTF-8; latin-1 decodes any byte sequence, so a
+            # mangled character beats refusing the file.
+            text = path.read_text(encoding="latin-1")
+        except OSError as e:
+            raise ValueError(f"Could not read {name}: {e}") from e
+        return [p for p in text.split("\n\n") if p.strip()], "paragraph"
+
+    raise ValueError(f"Unsupported document type {suffix!r}")
+
+
+def _run_extractor(cmd: list[str], name: str) -> str:
+    """Run a text-extraction command, turning its failures into ValueError."""
     try:
-        result = subprocess.run(
-            ["pdftotext", "-layout", file_path, "-"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=True,
-        )
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120, check=True
+        ).stdout
     except subprocess.CalledProcessError as e:
         raise ValueError(f"Could not read {name}: {e.stderr.strip()[:200]}") from e
     except subprocess.TimeoutExpired as e:
         raise ValueError(f"Timed out reading {name}") from e
 
-    # pdftotext separates pages with a form feed.
-    pages = [page for page in result.stdout.split("\f") if page.strip()]
-    if not pages:
-        raise ValueError(
-            f"{name} has no extractable text. It is probably a scan, which "
-            "needs OCR — this UI reads text layers only."
-        )
 
-    total_chars = sum(len(page) for page in pages)
-    if total_chars / len(pages) < MIN_CHARS_PER_PAGE:
+def extract_document_text(file_path: str) -> str:
+    """Extract a document's text as a labelled text content part.
+
+    Trims to MAX_DOCUMENT_TOKENS on a chunk boundary and says how much it kept,
+    because a document silently cut in half produces a confident answer about
+    the half that was sent.
+
+    Raises:
+        ValueError: If the file cannot be read or has no extractable text.
+    """
+    name = Path(file_path).name
+    chunks, unit = _read_document(file_path)
+
+    if not chunks:
+        raise ValueError(f"{name} contains no extractable text.")
+
+    total_chars = sum(len(c) for c in chunks)
+    if unit == "page" and total_chars / len(chunks) < MIN_CHARS_PER_PAGE:
         raise ValueError(
-            f"{name} yielded only {total_chars} characters across {len(pages)} "
+            f"{name} yielded only {total_chars} characters across {len(chunks)} "
             "pages, which means it is images of text rather than text. That "
             "needs OCR — this UI reads text layers only."
         )
@@ -159,33 +198,34 @@ def extract_document_text(file_path: str) -> str:
     budget = MAX_DOCUMENT_TOKENS * CHARS_PER_TOKEN
     kept: list[str] = []
     used = 0
-    for page in pages:
-        if used + len(page) > budget:
+    for chunk in chunks:
+        if used + len(chunk) > budget:
             break
-        kept.append(page)
-        used += len(page)
+        kept.append(chunk)
+        used += len(chunk)
 
-    if not kept:  # a single page larger than the whole budget
-        kept = [pages[0][:budget]]
+    plural = "" if len(chunks) == 1 else "s"
+    if not kept:  # a single chunk larger than the whole budget
+        kept = [chunks[0][:budget]]
         header = (
-            f"[Attached document: {name} — page 1 of {len(pages)}, truncated "
-            f"to fit the context window]"
+            f"[Attached document: {name} — first {unit} of {len(chunks)}, "
+            "truncated to fit the context window]"
         )
-    elif len(kept) < len(pages):
+    elif len(kept) < len(chunks):
         header = (
-            f"[Attached document: {name} — pages 1-{len(kept)} of "
-            f"{len(pages)}; the remaining {len(pages) - len(kept)} did not fit "
-            "in the context window and were NOT sent]"
+            f"[Attached document: {name} — {unit}s 1-{len(kept)} of "
+            f"{len(chunks)}; the remaining {len(chunks) - len(kept)} did not "
+            "fit in the context window and were NOT sent]"
         )
     else:
         header = (
-            f"[Attached document: {name} — {len(pages)} page"
-            f"{'s' if len(pages) != 1 else ''}, "
+            f"[Attached document: {name} — {len(chunks)} {unit}{plural}, "
             f"~{used // CHARS_PER_TOKEN} tokens]"
         )
 
     print(f"[Chat] {header}", flush=True)
-    return header + "\n\n" + "\f".join(kept).strip()
+    separator = "\f" if unit == "page" else "\n\n"
+    return header + "\n\n" + separator.join(kept).strip()
 
 
 def extract_document_figures(file_path: str) -> list[str]:
@@ -302,20 +342,26 @@ def build_media_items(files: list[str]) -> list[dict]:
     """
     items = []
     for file_path in files:
-        if Path(file_path).suffix.lower() in DOCUMENT_TYPES:
-            figures = extract_document_figures(file_path)
-            note = (
-                f" {len(figures)} figure image(s) attached."
-                if figures
-                else " No embedded figure images found — any figures in this PDF "
-                "are vector art and were NOT sent, so do not describe them."
-            )
+        suffix = Path(file_path).suffix.lower()
+        if suffix in DOCUMENT_TYPES:
+            # Only a PDF can carry embedded figures; .txt and .docx are text.
+            figures = extract_document_figures(file_path) if suffix == ".pdf" else []
+            if figures:
+                note = f" {len(figures)} figure image(s) attached."
+            elif suffix == ".pdf":
+                note = (
+                    " No embedded figure images found — any figures in this PDF "
+                    "are vector art and were NOT sent, so do not describe them."
+                )
+            else:
+                note = " This is a text document with no images."
             items.append(
                 {"type": "text", "text": extract_document_text(file_path) + "\n" + note}
             )
             for url in figures:
                 items.append({"type": "image_url", "image_url": {"url": url}})
-            print(f"[Chat] PDF figures attached: {len(figures)}", flush=True)
+            if suffix == ".pdf":
+                print(f"[Chat] PDF figures attached: {len(figures)}", flush=True)
             continue
         data_url, media_type = encode_file_to_base64(file_path)
         key = "image_url" if media_type == "image" else "video_url"
