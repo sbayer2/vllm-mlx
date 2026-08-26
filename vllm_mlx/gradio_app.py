@@ -3,7 +3,7 @@
 Gradio Chatbot Interface for vllm-mlx.
 
 A multimodal chat interface that connects to the vllm-mlx server
-and supports text, images, video, and PDF documents.
+and supports text, images, video, and documents (PDF, DOCX, TXT).
 
 Usage:
     # First start the server with a multimodal model:
@@ -796,7 +796,7 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
             ],
         )
     else:
-        print("Mode: Multimodal (text, image, and video)")
+        print("Mode: Multimodal (text, image, video, and documents)")
 
         capability_warning = check_server_multimodal(args.server_url)
         if capability_warning:
