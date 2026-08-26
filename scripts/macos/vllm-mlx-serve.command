@@ -11,6 +11,12 @@
 MODEL="${VLLM_MLX_MODEL:-mlx-community/Qwen3.8-27B-4bit}"
 SERVED_NAME="${VLLM_MLX_SERVED_NAME:-qwen}"
 PORT="${VLLM_MLX_PORT:-8000}"
+# 65536 prompt tokens costs ~4.3 GB of KV cache on this model: only 16 of its 64
+# layers are full attention, the other 48 are linear and keep fixed-size state.
+# The model itself allows 262144. Prefill is the real cost — a 12k-token video
+# prompt already takes ~50s, so a 65k one takes minutes. This raises the ceiling,
+# it does not make large prompts fast.
+MAX_REQUEST_TOKENS="${VLLM_MLX_MAX_REQUEST_TOKENS:-65536}"
 VENV="${VLLM_MLX_VENV:-$HOME/vllm-mlx-env}"
 GRACE_SECONDS=20
 
@@ -22,7 +28,8 @@ source "$VENV/bin/activate" || {
 
 echo "Model:  $MODEL"
 echo "Served: $SERVED_NAME on port $PORT"
-echo "Thinking disabled — video replies take ~1 min instead of ~8."
+echo "Thinking ON at ${VLLM_MLX_REASONING_EFFORT:-medium} effort — the model"
+echo "reasons before answering, so replies are slower than with it off."
 echo "Loading ~16 GB, roughly a minute."
 echo "Ctrl+C or closing this window stops the server cleanly."
 echo
@@ -33,12 +40,20 @@ echo
 # ours, and uvicorn reads a second SIGINT as "force quit, skip cleanup".
 set -m
 
-# --default-chat-template-kwargs keeps reasoning off on the video path too.
+# Reasoning is ON at medium effort. The template's default when thinking is
+# enabled is 'xhigh', which prepends "think carefully, validate key
+# assumptions, consider plausible alternatives" and can burn the whole
+# max_tokens budget before answering. 'medium' adds no such instruction.
+# Valid values are xhigh, medium, low — anything else makes the template
+# raise, and every request fails.
 # --timeout 900 so a slow prefill can't be cut off by the 300s default.
 vllm-mlx serve "$MODEL" \
     --served-model-name "$SERVED_NAME" \
     --port "$PORT" \
-    --default-chat-template-kwargs '{"enable_thinking": false}' \
+    --default-chat-template-kwargs \
+      "{\"enable_thinking\": ${VLLM_MLX_THINKING:-true}, \"reasoning_effort\": \"${VLLM_MLX_REASONING_EFFORT:-medium}\"}" \
+    --max-request-tokens "$MAX_REQUEST_TOKENS" \
+    --max-tokens "${VLLM_MLX_SERVER_MAX_TOKENS:-32768}" \
     --timeout 900 &
 SERVER_PID=$!
 set +m

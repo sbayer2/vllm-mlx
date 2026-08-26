@@ -5,7 +5,11 @@
 SERVED_NAME="${VLLM_MLX_SERVED_NAME:-qwen}"
 SERVER_PORT="${VLLM_MLX_PORT:-8000}"
 UI_PORT="${VLLM_MLX_UI_PORT:-7860}"
-MAX_TOKENS="${VLLM_MLX_MAX_TOKENS:-8192}"
+# Thinking and the answer share this budget: with reasoning on, the <think>
+# block is spent from the same allowance, so a reply can truncate mid-sentence
+# if this is set too tight. 32768 matches the server's own generation cap, so
+# this is the ceiling rather than a compromise.
+MAX_TOKENS="${VLLM_MLX_MAX_TOKENS:-32768}"
 VENV="${VLLM_MLX_VENV:-$HOME/vllm-mlx-env}"
 
 source "$VENV/bin/activate" || {

@@ -46,12 +46,43 @@ a minute and 16 GB to start.
 Every value is an environment variable, so switching models is one variable rather
 than an edit:
 
-| Variable | Default |
-|---|---|
-| `VLLM_MLX_MODEL` | `mlx-community/Qwen3.8-27B-4bit` |
-| `VLLM_MLX_SERVED_NAME` | `qwen` |
-| `VLLM_MLX_PORT` | `8000` |
-| `VLLM_MLX_UI_PORT` | `7860` |
-| `VLLM_MLX_MAX_TOKENS` | `8192` |
-| `VLLM_MLX_VENV` | `~/vllm-mlx-env` |
-| `VLLM_MLX_STOP_UI` | `1` |
+| Variable | Default | Notes |
+|---|---|---|
+| `VLLM_MLX_MODEL` | `mlx-community/Qwen3.8-27B-4bit` | |
+| `VLLM_MLX_SERVED_NAME` | `qwen` | must match on both scripts |
+| `VLLM_MLX_PORT` | `8000` | |
+| `VLLM_MLX_UI_PORT` | `7860` | |
+| `VLLM_MLX_THINKING` | `true` | `false` answers in seconds but drops accuracy on anything derivational |
+| `VLLM_MLX_REASONING_EFFORT` | `medium` | `xhigh`, `medium`, `low` only — anything else makes the chat template raise and every request fails |
+| `VLLM_MLX_MAX_REQUEST_TOKENS` | `65536` | prompt ceiling; ~4.3 GB of KV cache on this model |
+| `VLLM_MLX_SERVER_MAX_TOKENS` | `32768` | server-side generation cap |
+| `VLLM_MLX_MAX_TOKENS` | `32768` | per-reply budget, shared between `<think>` and the answer |
+| `VLLM_MLX_VENV` | `~/vllm-mlx-env` | |
+| `VLLM_MLX_STOP_UI` | `1` | |
+
+## Reasoning
+
+Thinking is on at `medium`. The chat template's default when thinking is
+enabled is `xhigh`, which prepends "think carefully, validate key assumptions,
+consider plausible alternatives" and can spend the whole generation budget
+before answering — that is what made video replies run past a 300s timeout.
+`medium` adds no such instruction.
+
+It is worth the tokens on anything analytical. Asked to describe a chart, the
+model with thinking off invented a colour scheme that was not in the figure;
+with thinking on it rejected a false premise in the question and read the
+legend correctly. Asked a two-pipe rate problem, off answered instantly and
+wrongly, on answered correctly in 8s.
+
+For purely descriptive work, `VLLM_MLX_REASONING_EFFORT=low` is the cheaper
+setting.
+
+## Context budget
+
+Only 16 of this model's 64 layers are full attention; the other 48 are linear
+and keep fixed-size state. KV cache therefore costs ~64 KB per token, so 65536
+prompt tokens is ~4.3 GB — modest next to the ~16 GB of weights. The model
+itself allows 262144.
+
+Raising the ceiling does not make long prompts fast: prefill dominates, and a
+12k-token video prompt already takes ~50s.
