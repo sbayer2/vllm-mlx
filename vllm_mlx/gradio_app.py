@@ -27,6 +27,7 @@ import base64
 import mimetypes
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import gradio as gr
@@ -81,6 +82,20 @@ MAX_DOCUMENT_TOKENS = 20000
 # A PDF whose pages yield almost no characters is a scan: the text layer is
 # absent and pdftotext has nothing to give. Say so rather than send empty text.
 MIN_CHARS_PER_PAGE = 40
+
+# Figures are sent as images alongside the text, because a chart's meaning is in
+# the picture: a caption reading "Illegal = bars" describes a hatch pattern that
+# cannot be recovered from the text layer, and a model given only the caption
+# will confidently invent what the figure looks like.
+MAX_FIGURE_IMAGES = 4
+
+# Images cost pixels / (patch^2 * merge^2) = pixels / 1024 tokens on Qwen3-VL
+# class models. Keep the figures well inside the request budget alongside text.
+MAX_FIGURE_TOKENS = 9000
+FIGURE_PIXELS_PER_TOKEN = 1024
+
+# Below this, an embedded image is a logo, rule, or icon rather than a figure.
+MIN_FIGURE_EDGE = 300
 
 # Extensions accepted by the upload widget, listed explicitly alongside the
 # "image"/"video" categories so a container the browser fails to type-sniff is
@@ -173,6 +188,65 @@ def extract_document_text(file_path: str) -> str:
     return header + "\n\n" + "\f".join(kept).strip()
 
 
+def extract_document_figures(file_path: str) -> list[str]:
+    """Extract a PDF's embedded figure images as base64 data URLs.
+
+    Only embedded rasters are found, which is what most journals ship. A paper
+    whose figures are vector art yields nothing here; the caller says so rather
+    than implying the document had no figures.
+
+    Downscales anything that would blow the token budget, largest figures first,
+    and returns at most MAX_FIGURE_IMAGES.
+    """
+    if shutil.which("pdfimages") is None:
+        return []
+
+    from PIL import Image
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = str(Path(tmp) / "fig")
+        try:
+            subprocess.run(
+                ["pdfimages", "-png", file_path, prefix],
+                capture_output=True, timeout=180, check=True,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return []
+
+        candidates = []
+        for png in sorted(Path(tmp).glob("fig-*.png")):
+            try:
+                with Image.open(png) as im:
+                    w, h = im.size
+            except Exception:
+                continue
+            if min(w, h) < MIN_FIGURE_EDGE:
+                continue  # logo, rule, or icon
+            candidates.append((w * h, png))
+
+        # Biggest first: the figure that carries the argument is rarely the
+        # publisher's mark.
+        candidates.sort(reverse=True)
+
+        urls, budget = [], MAX_FIGURE_TOKENS * FIGURE_PIXELS_PER_TOKEN
+        for pixels, png in candidates[:MAX_FIGURE_IMAGES]:
+            with Image.open(png) as im:
+                im = im.convert("RGB")
+                if pixels > budget:
+                    if budget < FIGURE_PIXELS_PER_TOKEN * 200:
+                        break
+                    scale = (budget / pixels) ** 0.5
+                    im = im.resize((max(1, int(im.width * scale)),
+                                    max(1, int(im.height * scale))))
+                    pixels = im.width * im.height
+                out = Path(tmp) / f"send-{png.stem}.png"
+                im.save(out, "PNG")
+            budget -= pixels
+            data = base64.b64encode(out.read_bytes()).decode("utf-8")
+            urls.append(f"data:image/png;base64,{data}")
+        return urls
+
+
 def encode_file_to_base64(file_path: str) -> tuple[str, str]:
     """
     Encode a file to base64 data URL.
@@ -229,7 +303,19 @@ def build_media_items(files: list[str]) -> list[dict]:
     items = []
     for file_path in files:
         if Path(file_path).suffix.lower() in DOCUMENT_TYPES:
-            items.append({"type": "text", "text": extract_document_text(file_path)})
+            figures = extract_document_figures(file_path)
+            note = (
+                f" {len(figures)} figure image(s) attached."
+                if figures
+                else " No embedded figure images found — any figures in this PDF "
+                "are vector art and were NOT sent, so do not describe them."
+            )
+            items.append(
+                {"type": "text", "text": extract_document_text(file_path) + "\n" + note}
+            )
+            for url in figures:
+                items.append({"type": "image_url", "image_url": {"url": url}})
+            print(f"[Chat] PDF figures attached: {len(figures)}", flush=True)
             continue
         data_url, media_type = encode_file_to_base64(file_path)
         key = "image_url" if media_type == "image" else "video_url"
