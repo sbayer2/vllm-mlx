@@ -422,6 +422,27 @@ def check_server_multimodal(server_url: str) -> str | None:
     return None
 
 
+def split_reasoning(message: dict) -> tuple[str, str]:
+    """Separate a reply into (reasoning, answer).
+
+    Prefers the server's own split: with --reasoning-parser, the thinking
+    arrives in reasoning_content and content holds only the answer. Falls back
+    to splitting a raw <think> block, so the UI behaves the same whether or not
+    the parser is enabled — and an unterminated block (the model hit the token
+    ceiling mid-thought) is shown as reasoning rather than swallowed.
+    """
+    answer = message.get("content") or ""
+    reasoning = message.get("reasoning_content") or ""
+
+    if not reasoning and "<think>" in answer:
+        before, _, rest = answer.partition("<think>")
+        thought, closed, after = rest.partition("</think>")
+        reasoning = thought.strip()
+        answer = (before + after).strip() if closed else before.strip()
+
+    return reasoning.strip(), answer.strip()
+
+
 def create_chat_function(
     server_url: str,
     max_tokens: int,
@@ -558,17 +579,45 @@ def create_chat_function(
             )
             response.raise_for_status()
             result = response.json()
-            answer = result["choices"][0]["message"]["content"]
+            reasoning, answer = split_reasoning(
+                result["choices"][0]["message"]
+            )
 
             usage = result.get("usage", {}) or {}
             prompt_tokens = usage.get("prompt_tokens", 0)
-            print(f"[Chat] prompt_tokens={prompt_tokens}", flush=True)
+            print(
+                f"[Chat] prompt_tokens={prompt_tokens} "
+                f"reasoning_chars={len(reasoning)}",
+                flush=True,
+            )
 
             warning = media_drop_warning(media_items, prompt_tokens)
             if warning:
                 print(f"[Chat] {warning}", flush=True)
-                return f"{answer}\n\n---\n{warning}"
-            return answer
+                answer = f"{answer}\n\n---\n{warning}"
+
+            if not answer and reasoning:
+                # The token budget ran out inside the thinking block. Say so,
+                # rather than returning an empty bubble.
+                answer = (
+                    "_The reply hit the token limit while still reasoning, so "
+                    "there is no final answer. Open the reasoning below, or "
+                    "raise --max-tokens._"
+                )
+
+            if not reasoning:
+                return answer
+
+            # metadata={"title": ...} is what makes Gradio render a message as a
+            # collapsed thought block instead of prose in the transcript.
+            return [
+                gr.ChatMessage(
+                    role="assistant",
+                    content=reasoning,
+                    metadata={"title": "Reasoning", "status": "done"},
+                ),
+                gr.ChatMessage(role="assistant", content=answer),
+            ]
 
         except requests.exceptions.ConnectionError:
             return "Error: Cannot connect to server. Make sure vllm-mlx is running."
