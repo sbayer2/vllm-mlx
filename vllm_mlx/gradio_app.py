@@ -3,7 +3,7 @@
 Gradio Chatbot Interface for vllm-mlx.
 
 A multimodal chat interface that connects to the vllm-mlx server
-and supports text, images, and video files.
+and supports text, images, video, and PDF documents.
 
 Usage:
     # First start the server with a multimodal model:
@@ -25,6 +25,8 @@ Note:
 import argparse
 import base64
 import mimetypes
+import shutil
+import subprocess
 from pathlib import Path
 
 import gradio as gr
@@ -61,10 +63,114 @@ VIDEO_TYPES = {
     ".3gp": "video/3gpp",
 }
 
+# Documents are not sent to the model as pixels. A PDF has a text layer, and
+# reading it is both cheaper and far more accurate than asking a vision encoder
+# to read 9pt type: a page of text costs ~1.2k tokens and is exact, where the
+# same page rendered at 150 DPI costs ~2k tokens and invites misread digits.
+# So a PDF becomes a *text* content part, which needs no server support at all.
+DOCUMENT_TYPES = {".pdf": "application/pdf"}
+
+# Rough chars-per-token for English prose. Only used to warn and to trim, so an
+# approximation is fine — the server enforces the real limit.
+CHARS_PER_TOKEN = 4
+
+# Leave room in the request for the question and the model's answer. The server
+# default is 32768 max request tokens.
+MAX_DOCUMENT_TOKENS = 20000
+
+# A PDF whose pages yield almost no characters is a scan: the text layer is
+# absent and pdftotext has nothing to give. Say so rather than send empty text.
+MIN_CHARS_PER_PAGE = 40
+
 # Extensions accepted by the upload widget, listed explicitly alongside the
 # "image"/"video" categories so a container the browser fails to type-sniff is
 # still offered to the server rather than rejected in the file picker.
-UPLOAD_FILE_TYPES = ["image", "video"] + sorted(IMAGE_TYPES) + sorted(VIDEO_TYPES)
+UPLOAD_FILE_TYPES = (
+    ["image", "video"]
+    + sorted(IMAGE_TYPES)
+    + sorted(VIDEO_TYPES)
+    + sorted(DOCUMENT_TYPES)
+)
+
+
+def extract_document_text(file_path: str) -> str:
+    """Extract a PDF's text layer as a labelled text content part.
+
+    Trims to MAX_DOCUMENT_TOKENS on a page boundary and says how many pages it
+    kept, because a document silently cut in half produces a confident answer
+    about the wrong half.
+
+    Raises:
+        ValueError: If pdftotext is unavailable, the file cannot be read, or
+            the PDF has no text layer to extract.
+    """
+    name = Path(file_path).name
+
+    if shutil.which("pdftotext") is None:
+        raise ValueError(
+            f"Cannot read {name}: pdftotext is not installed. "
+            "Install it with: brew install poppler"
+        )
+
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", file_path, "-"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"Could not read {name}: {e.stderr.strip()[:200]}") from e
+    except subprocess.TimeoutExpired as e:
+        raise ValueError(f"Timed out reading {name}") from e
+
+    # pdftotext separates pages with a form feed.
+    pages = [page for page in result.stdout.split("\f") if page.strip()]
+    if not pages:
+        raise ValueError(
+            f"{name} has no extractable text. It is probably a scan, which "
+            "needs OCR — this UI reads text layers only."
+        )
+
+    total_chars = sum(len(page) for page in pages)
+    if total_chars / len(pages) < MIN_CHARS_PER_PAGE:
+        raise ValueError(
+            f"{name} yielded only {total_chars} characters across {len(pages)} "
+            "pages, which means it is images of text rather than text. That "
+            "needs OCR — this UI reads text layers only."
+        )
+
+    budget = MAX_DOCUMENT_TOKENS * CHARS_PER_TOKEN
+    kept: list[str] = []
+    used = 0
+    for page in pages:
+        if used + len(page) > budget:
+            break
+        kept.append(page)
+        used += len(page)
+
+    if not kept:  # a single page larger than the whole budget
+        kept = [pages[0][:budget]]
+        header = (
+            f"[Attached document: {name} — page 1 of {len(pages)}, truncated "
+            f"to fit the context window]"
+        )
+    elif len(kept) < len(pages):
+        header = (
+            f"[Attached document: {name} — pages 1-{len(kept)} of "
+            f"{len(pages)}; the remaining {len(pages) - len(kept)} did not fit "
+            "in the context window and were NOT sent]"
+        )
+    else:
+        header = (
+            f"[Attached document: {name} — {len(pages)} page"
+            f"{'s' if len(pages) != 1 else ''}, "
+            f"~{used // CHARS_PER_TOKEN} tokens]"
+        )
+
+    print(f"[Chat] {header}", flush=True)
+    return header + "\n\n" + "\f".join(kept).strip()
 
 
 def encode_file_to_base64(file_path: str) -> tuple[str, str]:
@@ -100,7 +206,10 @@ def encode_file_to_base64(file_path: str) -> tuple[str, str]:
             raise ValueError(
                 f"Unsupported file type {suffix or path.name!r} "
                 f"(detected MIME: {guessed or 'unknown'}). "
-                "Supported: " + ", ".join(sorted(IMAGE_TYPES) + sorted(VIDEO_TYPES))
+                "Supported: "
+                + ", ".join(
+                    sorted(IMAGE_TYPES) + sorted(VIDEO_TYPES) + sorted(DOCUMENT_TYPES)
+                )
             )
 
     with open(file_path, "rb") as f:
@@ -110,13 +219,18 @@ def encode_file_to_base64(file_path: str) -> tuple[str, str]:
 
 
 def build_media_items(files: list[str]) -> list[dict]:
-    """Encode files into OpenAI-format media content parts.
+    """Turn attachments into OpenAI-format content parts.
 
-    Every file produces a part or an exception — no file is skipped, because a
-    skipped attachment is invisible to the user and to the server.
+    Images and video become media parts; documents become text parts, because
+    the model has no document input and a PDF's text layer is better read than
+    rendered. Every file produces a part or an exception — no file is skipped,
+    because a skipped attachment is invisible to the user and to the server.
     """
     items = []
     for file_path in files:
+        if Path(file_path).suffix.lower() in DOCUMENT_TYPES:
+            items.append({"type": "text", "text": extract_document_text(file_path)})
+            continue
         data_url, media_type = encode_file_to_base64(file_path)
         key = "image_url" if media_type == "image" else "video_url"
         items.append({"type": key, key: {"url": data_url}})
