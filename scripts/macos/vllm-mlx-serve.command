@@ -46,12 +46,16 @@ set -m
 # max_tokens budget before answering. 'medium' adds no such instruction.
 # Valid values are xhigh, medium, low — anything else makes the template
 # raise, and every request fails.
+# --reasoning-parser splits <think>...</think> out of the reply into a
+# separate reasoning_content field, so the answer arrives clean. The model
+# still reasons and still spends the tokens; only the packaging changes.
 # --timeout 900 so a slow prefill can't be cut off by the 300s default.
 vllm-mlx serve "$MODEL" \
     --served-model-name "$SERVED_NAME" \
     --port "$PORT" \
     --default-chat-template-kwargs \
       "{\"enable_thinking\": ${VLLM_MLX_THINKING:-true}, \"reasoning_effort\": \"${VLLM_MLX_REASONING_EFFORT:-medium}\"}" \
+    --reasoning-parser "${VLLM_MLX_REASONING_PARSER:-qwen3}" \
     --max-request-tokens "$MAX_REQUEST_TOKENS" \
     --max-tokens "${VLLM_MLX_SERVER_MAX_TOKENS:-32768}" \
     --timeout 900 &

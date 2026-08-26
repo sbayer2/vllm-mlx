@@ -54,6 +54,7 @@ than an edit:
 | `VLLM_MLX_UI_PORT` | `7860` | |
 | `VLLM_MLX_THINKING` | `true` | `false` answers in seconds but drops accuracy on anything derivational |
 | `VLLM_MLX_REASONING_EFFORT` | `medium` | `xhigh`, `medium`, `low` only — anything else makes the chat template raise and every request fails |
+| `VLLM_MLX_REASONING_PARSER` | `qwen3` | splits `<think>` out of the reply into `reasoning_content`; the UI then shows it as a collapsed block |
 | `VLLM_MLX_MAX_REQUEST_TOKENS` | `65536` | prompt ceiling; ~4.3 GB of KV cache on this model |
 | `VLLM_MLX_SERVER_MAX_TOKENS` | `32768` | server-side generation cap |
 | `VLLM_MLX_MAX_TOKENS` | `32768` | per-reply budget, shared between `<think>` and the answer |
