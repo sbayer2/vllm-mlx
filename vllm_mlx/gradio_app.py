@@ -72,11 +72,22 @@ VIDEO_TYPES = {
 DOCUMENT_TYPES = {
     ".pdf": "application/pdf",
     ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".csv": "text/csv",
     ".docx": (
         "application/vnd.openxmlformats-officedocument"
         ".wordprocessingml.document"
     ),
+    ".xlsx": (
+        "application/vnd.openxmlformats-officedocument"
+        ".spreadsheetml.sheet"
+    ),
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
 }
+
+# Rejoining separator per chunk unit, so reassembled text reads the way the
+# source did rather than running rows or pages together.
+CHUNK_SEPARATORS = {"page": "\f", "paragraph": "\n\n", "row": "\n"}
 
 # Rough chars-per-token for English prose. Only used to warn and to trim, so an
 # approximation is fine — the server enforces the real limit.
@@ -145,18 +156,70 @@ def _read_document(file_path: str) -> tuple[list[str], str]:
         )
         return [p for p in text.split("\n\n") if p.strip()], "paragraph"
 
-    if suffix == ".txt":
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # Not everything is UTF-8; latin-1 decodes any byte sequence, so a
-            # mangled character beats refusing the file.
-            text = path.read_text(encoding="latin-1")
-        except OSError as e:
-            raise ValueError(f"Could not read {name}: {e}") from e
+    if suffix in (".xlsx", ".xlsm"):
+        return _read_spreadsheet(file_path, name), "row"
+
+    if suffix == ".csv":
+        return [ln for ln in _read_text_file(path).splitlines() if ln.strip()], "row"
+
+    if suffix in (".txt", ".md"):
+        text = _read_text_file(path)
         return [p for p in text.split("\n\n") if p.strip()], "paragraph"
 
     raise ValueError(f"Unsupported document type {suffix!r}")
+
+
+def _read_text_file(path: Path) -> str:
+    """Read a text file, tolerating non-UTF-8 bytes.
+
+    latin-1 decodes any byte sequence, so a mangled character beats refusing
+    the document outright.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="latin-1")
+    except OSError as e:
+        raise ValueError(f"Could not read {path.name}: {e}") from e
+
+
+def _read_spreadsheet(file_path: str, name: str) -> list[str]:
+    """Read a workbook into one tab-separated line per row.
+
+    Sheet titles are emitted as their own chunk so a truncated workbook still
+    shows which sheet the surviving rows came from.
+
+    data_only=True asks for the last values Excel cached rather than formula
+    text. A workbook written by a script and never opened in Excel has no
+    cached values, so formula cells read as empty — that is a property of the
+    file, not a bug here, and is worth knowing before trusting a blank column.
+    """
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:
+        raise ValueError(
+            f"Cannot read {name}: openpyxl is not installed. "
+            "Install it with: pip install openpyxl"
+        ) from e
+
+    try:
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+    except Exception as e:
+        raise ValueError(f"Could not read {name}: {e}") from e
+
+    chunks: list[str] = []
+    try:
+        for sheet in workbook.worksheets:
+            chunks.append(f"### Sheet: {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                if row is None or all(cell is None for cell in row):
+                    continue  # blank spacer rows carry nothing
+                chunks.append(
+                    "\t".join("" if cell is None else str(cell) for cell in row)
+                )
+    finally:
+        workbook.close()
+    return chunks
 
 
 def _run_extractor(cmd: list[str], name: str) -> str:
@@ -224,7 +287,7 @@ def extract_document_text(file_path: str) -> str:
         )
 
     print(f"[Chat] {header}", flush=True)
-    separator = "\f" if unit == "page" else "\n\n"
+    separator = CHUNK_SEPARATORS.get(unit, "\n\n")
     return header + "\n\n" + separator.join(kept).strip()
 
 
@@ -418,6 +481,9 @@ OMITTED_MEDIA_NOTE = (
 
 def media_drop_warning(media_items: list[dict], prompt_tokens: int) -> str | None:
     """Detect an attachment that was accepted and then silently dropped.
+
+    Applies to image and video attachments only; see the call site for why a
+    text document is exempt.
 
     Every media-handling bug found in this stack returned HTTP 200 with a
     fluent answer — "I don't see any video" — and everyone blamed the model.
@@ -637,7 +703,15 @@ def create_chat_function(
                 flush=True,
             )
 
-            warning = media_drop_warning(media_items, prompt_tokens)
+            # Only image and video parts can vanish without trace. A
+            # document arrives as text, so it is in the prompt by
+            # construction and its token cost is proportional to its
+            # size — a small spreadsheet legitimately costs ~50 tokens,
+            # which would trip the threshold and cry wolf.
+            sent_media = [
+                item for item in media_items if item["type"] != "text"
+            ]
+            warning = media_drop_warning(sent_media, prompt_tokens)
             if warning:
                 print(f"[Chat] {warning}", flush=True)
                 answer = f"{answer}\n\n---\n{warning}"
