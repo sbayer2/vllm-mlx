@@ -578,6 +578,15 @@ def create_chat_function(
     # request and otherwise gets decoded and prefetched again on every turn.
     media_message_indexes: set[int] = set()
 
+    # Documents ARE replayed, unlike image and video bytes. A PDF arrives as
+    # text: there is nothing to decode, its cost is proportional to its length
+    # rather than its file size, and the server's prefix cache is on by default,
+    # so resending an identical document prefix is nearly free after the first
+    # turn. Dropping it would instead force the user to reattach the same file
+    # to ask a second question about it — paying the extraction and the full
+    # prefill again to get back where they were.
+    document_text_by_index: dict[int, list[str]] = {}
+
     def chat(message: dict, history: list) -> str:
         """
         Process a multimodal message and return response.
@@ -598,6 +607,7 @@ def create_chat_function(
         # new chat whose message numbering starts at zero again.
         if not history:
             media_message_indexes.clear()
+            document_text_by_index.clear()
 
         # Debug output
         import sys
@@ -611,6 +621,7 @@ def create_chat_function(
         messages = []
 
         omitted_media_count = 0
+        replayed_documents = 0
         # Process history as text only. Historical media is represented by a
         # marker so the model knows it must request a reattachment rather than
         # hallucinating unseen visual details.
@@ -631,6 +642,16 @@ def create_chat_function(
                 elif not isinstance(content, str):
                     content = str(content)
 
+                if i in document_text_by_index and role == "user":
+                    # Put the document back exactly as it was first sent, so the
+                    # prefix matches and the server's cache can reuse it.
+                    content = "\n\n".join(
+                        [content, *document_text_by_index[i]]
+                        if content
+                        else document_text_by_index[i]
+                    )
+                    replayed_documents += 1
+
                 if i in media_message_indexes and role == "user":
                     content = (
                         f"{content}\n\n{OMITTED_MEDIA_NOTE}"
@@ -640,6 +661,13 @@ def create_chat_function(
                     omitted_media_count += 1
 
                 messages.append({"role": role, "content": content})
+
+        if replayed_documents:
+            print(
+                f"[Chat] Replayed {replayed_documents} historical document(s) "
+                "so follow-up questions need no reattachment",
+                flush=True,
+            )
 
         if omitted_media_count:
             print(
@@ -663,12 +691,25 @@ def create_chat_function(
 
         # Remember attachment presence, not its base64 bytes. This message will
         # appear at index len(history) when Gradio submits the next turn.
-        if media_items:
-            current_idx = len(history)
+        current_idx = len(history)
+        document_parts = [i for i in media_items if i["type"] == "text"]
+        heavy_parts = [i for i in media_items if i["type"] != "text"]
+
+        if document_parts:
+            document_text_by_index[current_idx] = [
+                part["text"] for part in document_parts
+            ]
+            print(
+                f"[Chat] Kept {len(document_parts)} document(s) for message "
+                f"{current_idx}; they replay on later turns",
+                flush=True,
+            )
+
+        if heavy_parts:
             media_message_indexes.add(current_idx)
             print(
-                f"[Chat] Sent {len(media_items)} media item(s) for message {current_idx}; "
-                "historical replay disabled",
+                f"[Chat] Sent {len(heavy_parts)} media item(s) for message "
+                f"{current_idx}; historical replay disabled",
                 flush=True,
             )
 
