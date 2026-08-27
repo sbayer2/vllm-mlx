@@ -10,6 +10,10 @@ UI_PORT="${VLLM_MLX_UI_PORT:-7860}"
 # if this is set too tight. 32768 matches the server's own generation cap, so
 # this is the ceiling rather than a compromise.
 MAX_TOKENS="${VLLM_MLX_MAX_TOKENS:-32768}"
+# Must be at least the server's --timeout, which reads the same variable.
+# A shorter client deadline reports "server took too long" for a request the
+# server is still working on, and throws the work away.
+REQUEST_TIMEOUT="${VLLM_MLX_TIMEOUT:-1800}"
 VENV="${VLLM_MLX_VENV:-$HOME/vllm-mlx-env}"
 
 source "$VENV/bin/activate" || {
@@ -33,6 +37,7 @@ vllm-mlx-chat \
     --server-url "http://127.0.0.1:$SERVER_PORT" \
     --served-model-name "$SERVED_NAME" \
     --max-tokens "$MAX_TOKENS" \
+    --request-timeout "$REQUEST_TIMEOUT" \
     --port "$UI_PORT" &
 UI_PID=$!
 set +m
