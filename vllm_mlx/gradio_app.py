@@ -115,6 +115,13 @@ FIGURE_PIXELS_PER_TOKEN = 1024
 # Below this, an embedded image is a logo, rule, or icon rather than a figure.
 MIN_FIGURE_EDGE = 300
 
+# Seconds to wait for the server. This must not be lower than the server's own
+# --timeout: a shorter client deadline reports "server took too long" for a
+# request the server is still happily working on, and the work is thrown away.
+# A large prompt makes this real — prefill on tens of thousands of tokens, plus
+# generation at ~17 tok/s, runs to many minutes.
+DEFAULT_REQUEST_TIMEOUT = 1800
+
 # Extensions accepted by the upload widget, listed explicitly alongside the
 # "image"/"video" categories so a container the browser fails to type-sniff is
 # still offered to the server rather than rejected in the file picker.
@@ -560,6 +567,7 @@ def create_chat_function(
     max_tokens: int,
     temperature: float,
     served_model_name: str = "default",
+    request_timeout: float = DEFAULT_REQUEST_TIMEOUT,
 ):
     """
     Create the chat function for Gradio ChatInterface.
@@ -569,6 +577,9 @@ def create_chat_function(
         max_tokens: Maximum tokens to generate
         temperature: Sampling temperature
         served_model_name: Model name to send in OpenAI-compatible requests
+        request_timeout: Seconds to wait for a reply. Must be at least the
+            server's own --timeout, or the UI reports a timeout for a request
+            the server is still working on.
 
     Returns:
         Chat function compatible with gr.ChatInterface
@@ -748,7 +759,7 @@ def create_chat_function(
                     "max_tokens": max_tokens,
                     "temperature": temperature,
                 },
-                timeout=600,
+                timeout=request_timeout,
             )
             response.raise_for_status()
             result = response.json()
@@ -854,6 +865,15 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
         help="Maximum tokens to generate (default: 2048)",
     )
     parser.add_argument(
+        "--request-timeout",
+        type=float,
+        default=DEFAULT_REQUEST_TIMEOUT,
+        help=(
+            f"Seconds to wait for the server (default: {DEFAULT_REQUEST_TIMEOUT}). "
+            "Keep this at or above the server's --timeout."
+        ),
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=0.2,
@@ -912,7 +932,7 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
                         "max_tokens": args.max_tokens,
                         "temperature": args.temperature,
                     },
-                    timeout=120,
+                    timeout=args.request_timeout,
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -947,6 +967,7 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             served_model_name=args.served_model_name,
+            request_timeout=args.request_timeout,
         )
 
         # Create ChatInterface with multimodal support
