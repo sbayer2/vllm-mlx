@@ -53,8 +53,9 @@ than an edit:
 | `VLLM_MLX_PORT` | `8000` | |
 | `VLLM_MLX_UI_PORT` | `7860` | |
 | `VLLM_MLX_THINKING` | `true` | `false` answers in seconds but drops accuracy on anything derivational |
-| `VLLM_MLX_REASONING_EFFORT` | `medium` | `xhigh`, `medium`, `low` only — anything else makes the chat template raise and every request fails |
+| `VLLM_MLX_REASONING_EFFORT` | `low` | `xhigh`, `medium`, `low` only — anything else makes the chat template raise and every request fails |
 | `VLLM_MLX_REASONING_PARSER` | `qwen3` | splits `<think>` out of the reply into `reasoning_content`; the UI then shows it as a collapsed block |
+| `VLLM_MLX_TIMEOUT` | `1800` | server-side request timeout in seconds; prefill on a large prompt is the reason this is generous |
 | `VLLM_MLX_MAX_REQUEST_TOKENS` | `65536` | prompt ceiling; ~4.3 GB of KV cache on this model |
 | `VLLM_MLX_SERVER_MAX_TOKENS` | `32768` | server-side generation cap |
 | `VLLM_MLX_MAX_TOKENS` | `32768` | per-reply budget, shared between `<think>` and the answer |
@@ -63,11 +64,12 @@ than an edit:
 
 ## Reasoning
 
-Thinking is on at `medium`. The chat template's default when thinking is
-enabled is `xhigh`, which prepends "think carefully, validate key assumptions,
-consider plausible alternatives" and can spend the whole generation budget
-before answering — that is what made video replies run past a 300s timeout.
-`medium` adds no such instruction.
+Thinking is on at `low`, which asks the model to "keep your thinking brief and
+focused, moving directly to the conclusion". The template's default when
+thinking is enabled is `xhigh` — "think carefully, validate key assumptions,
+consider plausible alternatives" — which can spend the whole generation budget
+before answering and is what made video replies run past a 300s timeout.
+`medium` sits between them and adds no instruction at all.
 
 It is worth the tokens on anything analytical. Asked to describe a chart, the
 model with thinking off invented a colour scheme that was not in the figure;
@@ -75,8 +77,9 @@ with thinking on it rejected a false premise in the question and read the
 legend correctly. Asked a two-pipe rate problem, off answered instantly and
 wrongly, on answered correctly in 8s.
 
-For purely descriptive work, `VLLM_MLX_REASONING_EFFORT=low` is the cheaper
-setting.
+Raise it with `VLLM_MLX_REASONING_EFFORT=medium` when a question is
+derivational rather than descriptive — reconciling figures against a table,
+checking whether a stated interaction is consistent with the numbers.
 
 ## Context budget
 

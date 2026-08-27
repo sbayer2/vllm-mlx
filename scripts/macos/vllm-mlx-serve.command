@@ -28,7 +28,7 @@ source "$VENV/bin/activate" || {
 
 echo "Model:  $MODEL"
 echo "Served: $SERVED_NAME on port $PORT"
-echo "Thinking ON at ${VLLM_MLX_REASONING_EFFORT:-medium} effort — the model"
+echo "Thinking ON at ${VLLM_MLX_REASONING_EFFORT:-low} effort — the model"
 echo "reasons before answering, so replies are slower than with it off."
 echo "Loading ~16 GB, roughly a minute."
 echo "Ctrl+C or closing this window stops the server cleanly."
@@ -40,25 +40,27 @@ echo
 # ours, and uvicorn reads a second SIGINT as "force quit, skip cleanup".
 set -m
 
-# Reasoning is ON at medium effort. The template's default when thinking is
+# Reasoning is ON at low effort. The template's default when thinking is
 # enabled is 'xhigh', which prepends "think carefully, validate key
 # assumptions, consider plausible alternatives" and can burn the whole
-# max_tokens budget before answering. 'medium' adds no such instruction.
-# Valid values are xhigh, medium, low — anything else makes the template
-# raise, and every request fails.
+# max_tokens budget before answering; 'medium' adds no instruction at all;
+# 'low' asks for brief thinking that moves directly to the conclusion. Valid
+# values are xhigh, medium, low — anything else makes the template raise, and
+# every request fails.
 # --reasoning-parser splits <think>...</think> out of the reply into a
 # separate reasoning_content field, so the answer arrives clean. The model
 # still reasons and still spends the tokens; only the packaging changes.
-# --timeout 900 so a slow prefill can't be cut off by the 300s default.
+# --timeout 1800 so a long prefill can't be cut off by the 300s default: a
+# 12k-token video prompt already takes ~50s and prefill scales with size.
 vllm-mlx serve "$MODEL" \
     --served-model-name "$SERVED_NAME" \
     --port "$PORT" \
     --default-chat-template-kwargs \
-      "{\"enable_thinking\": ${VLLM_MLX_THINKING:-true}, \"reasoning_effort\": \"${VLLM_MLX_REASONING_EFFORT:-medium}\"}" \
+      "{\"enable_thinking\": ${VLLM_MLX_THINKING:-true}, \"reasoning_effort\": \"${VLLM_MLX_REASONING_EFFORT:-low}\"}" \
     --reasoning-parser "${VLLM_MLX_REASONING_PARSER:-qwen3}" \
     --max-request-tokens "$MAX_REQUEST_TOKENS" \
     --max-tokens "${VLLM_MLX_SERVER_MAX_TOKENS:-32768}" \
-    --timeout 900 &
+    --timeout "${VLLM_MLX_TIMEOUT:-1800}" &
 SERVER_PID=$!
 set +m
 
