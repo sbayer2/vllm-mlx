@@ -622,11 +622,24 @@ def create_chat_function(
 
         omitted_media_count = 0
         replayed_documents = 0
+        skipped_reasoning = 0
         # Process history as text only. Historical media is represented by a
         # marker so the model knows it must request a reattachment rather than
         # hallucinating unseen visual details.
         for i, msg in enumerate(history):
             if isinstance(msg, dict):
+                # Skip the collapsed reasoning blocks this UI emits. Gradio
+                # hands them back in history like any other assistant message,
+                # so without this the model is fed its own scratch work as
+                # prior output — and the thinking is routinely longer than the
+                # answer, so it dominates the transcript within a few turns.
+                # Enumerate still walks the raw list, so the indexes used for
+                # document and media lookups stay correct.
+                metadata = msg.get("metadata") or {}
+                if isinstance(metadata, dict) and metadata.get("title"):
+                    skipped_reasoning += 1
+                    continue
+
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
 
@@ -661,6 +674,13 @@ def create_chat_function(
                     omitted_media_count += 1
 
                 messages.append({"role": role, "content": content})
+
+        if skipped_reasoning:
+            print(
+                f"[Chat] Dropped {skipped_reasoning} reasoning block(s) from "
+                "history; only answers are replayed",
+                flush=True,
+            )
 
         if replayed_documents:
             print(
@@ -836,8 +856,12 @@ Note: Make sure the vllm-mlx server is running with a multimodal model:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.7,
-        help="Sampling temperature (default: 0.7)",
+        default=0.2,
+        help=(
+            "Sampling temperature (default: 0.2). Low by design: attachments "
+            "are usually analysed for figures and quotes, and a temperature "
+            "that rewords freely also rewords numbers."
+        ),
     )
     parser.add_argument(
         "--served-model-name",
