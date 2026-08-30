@@ -1649,7 +1649,15 @@ async def lifespan(app: FastAPI):
     finally:
         _get_idle_unload_event().set()
         _lifespan_active = False
-        if _exit_process_after_shutdown and primary_exc is None:
+        # Only a shutdown that raised nothing may skip finalization. If either
+        # the request-serving phase or the cleanup phase failed, fall through
+        # and let the exception propagate: the caller has to see it, and the
+        # process has to exit non-zero. Exiting here on a cleanup failure would
+        # report a failed shutdown as a success and make the raise below
+        # unreachable — reintroducing, in the fix, exactly the silent-failure
+        # class this change set exists to remove.
+        clean = primary_exc is None and cleanup_exc is None
+        if _exit_process_after_shutdown and clean:
             from .cli import _exit_without_finalizing
 
             logger.info("Shutdown complete")
