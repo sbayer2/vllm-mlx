@@ -73,18 +73,13 @@ def _exit_without_finalizing(status: int = 0) -> None:
 
     Run the one atexit handler we own first. Set VLLM_MLX_CLEAN_EXIT=0 to keep
     normal finalization when debugging.
-    """
-    if os.environ.get("VLLM_MLX_CLEAN_EXIT", "1") == "0":
-        return
-    try:
-        from .models.mllm import cleanup_all_temp_files
 
-        cleanup_all_temp_files()
-    except Exception:
-        pass
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(status)
+    The decision policy and exit mechanics live in ``vllm_mlx.shutdown`` so
+    they are testable without MLX; this name is kept for its call sites.
+    """
+    from .shutdown import exit_without_finalizing
+
+    exit_without_finalizing(status)
 
 
 def serve_command(args):
