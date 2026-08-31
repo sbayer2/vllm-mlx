@@ -83,7 +83,9 @@ def test_embedded_use_never_exits():
     """
     assert should_exit_without_finalizing(None, None, False, env={}) is False
     assert (
-        should_exit_without_finalizing(None, None, False, env={"VLLM_MLX_CLEAN_EXIT": "1"})
+        should_exit_without_finalizing(
+            None, None, False, env={"VLLM_MLX_CLEAN_EXIT": "1"}
+        )
         is False
     )
 
@@ -186,7 +188,9 @@ def test_both_launcher_call_sites_opt_in():
             for a in assigns
             if isinstance(a.value, ast.Constant) and a.value.value is True
         ]
-        assert true_assigns, f"{module}: no `_exit_process_after_shutdown = True` call site"
+        assert (
+            true_assigns
+        ), f"{module}: no `_exit_process_after_shutdown = True` call site"
 
 
 def test_lifespan_consults_the_shared_predicate():
@@ -204,4 +208,6 @@ def test_lifespan_consults_the_shared_predicate():
     ]
     assert calls, "lifespan does not call should_exit_without_finalizing"
     args = calls[0].args
-    assert len(args) == 3, "predicate must receive primary_exc, cleanup_exc, opt-in flag"
+    assert (
+        len(args) == 3
+    ), "predicate must receive primary_exc, cleanup_exc, opt-in flag"
