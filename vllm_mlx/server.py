@@ -1655,13 +1655,16 @@ async def lifespan(app: FastAPI):
         # process has to exit non-zero. Exiting here on a cleanup failure would
         # report a failed shutdown as a success and make the raise below
         # unreachable — reintroducing, in the fix, exactly the silent-failure
-        # class this change set exists to remove.
-        clean = primary_exc is None and cleanup_exc is None
-        if _exit_process_after_shutdown and clean:
-            from .cli import _exit_without_finalizing
+        # class this change set exists to remove. The predicate lives in
+        # vllm_mlx.shutdown, which imports no engine code, so standard CI
+        # exercises it on every platform.
+        from .shutdown import exit_without_finalizing, should_exit_without_finalizing
 
+        if should_exit_without_finalizing(
+            primary_exc, cleanup_exc, _exit_process_after_shutdown
+        ):
             logger.info("Shutdown complete")
-            _exit_without_finalizing()
+            exit_without_finalizing()
 
     if primary_exc is not None:
         if cleanup_exc is not None:

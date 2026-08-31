@@ -53,10 +53,21 @@ def server(monkeypatch):
 
 @pytest.fixture
 def exit_calls(monkeypatch):
-    """Record calls to the exit helper instead of ending the test process."""
+    """Record calls to the exit helper instead of ending the test process.
+
+    The lifespan guard calls vllm_mlx.shutdown.exit_without_finalizing (the
+    cli name is a kept alias for other callers), so that is what gets patched:
+    patching the alias would let the real os._exit(0) end the pytest process
+    mid-run — silently, since the status is 0.
+    """
     calls: list[tuple] = []
     monkeypatch.setattr(
-        "vllm_mlx.cli._exit_without_finalizing",
+        "vllm_mlx.server.exit_without_finalizing",
+        lambda *args, **kwargs: calls.append(args),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "vllm_mlx.shutdown.exit_without_finalizing",
         lambda *args, **kwargs: calls.append(args),
     )
     return calls
