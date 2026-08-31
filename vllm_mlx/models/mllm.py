@@ -1799,6 +1799,21 @@ class MLXMultimodalLM:
                 elif ntype == "audio" and nitem.get("audio"):
                     audio_inputs.append(nitem["audio"])
 
+        # Fail closed on multi-video requests: mlx_vlm.generate takes one
+        # scalar fps and fans it out to every clip, so a second video's frames
+        # would be timestamped with the first video's sampled rate - silently
+        # wrong timestamps rather than an error. Until per-video timestamp
+        # handling exists (calling the processor directly instead of going
+        # through mlx_vlm.generate), reject the request with the reason.
+        if len(video_paths) > 1:
+            raise ValueError(
+                f"Native video supports one video per request; got "
+                f"{len(video_paths)}. Multiple clips would share the first "
+                "clip's sampled fps for timestamp tokens, mislabeling every "
+                "frame of the others. Send one video per request, or "
+                "concatenate the clips first."
+            )
+
         # Decode each video to (T, C, H, W) frames and validate the result
         # before it can reach the model.
         videos: list[np.ndarray] = []
