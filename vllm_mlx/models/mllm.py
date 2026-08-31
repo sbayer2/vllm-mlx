@@ -1283,9 +1283,7 @@ def assert_video_decoded(
             f"Implausible frame size {width}x{height} decoded from {video_path}"
         )
 
-    logger.info(
-        f"Video decode OK: {count} frames, {width}x{height}, from {video_path}"
-    )
+    logger.info(f"Video decode OK: {count} frames, {width}x{height}, from {video_path}")
     return count, width, height
 
 
