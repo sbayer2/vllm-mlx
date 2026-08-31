@@ -121,6 +121,81 @@ def test_name_patterns_remain_the_fallback():
     assert is_mllm_model("some-org/definitely-a-text-model") is False
 
 
+@pytest.fixture
+def no_network(monkeypatch):
+    """Any socket creation fails the test: these paths must stay offline."""
+    import socket
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError("network access attempted in a no-network test")
+
+    monkeypatch.setattr(socket, "socket", _refuse)
+    monkeypatch.setattr(socket, "create_connection", _refuse)
+
+
+@pytest.fixture
+def hub_cache(tmp_path, monkeypatch):
+    """Redirect huggingface_hub's cache lookup to an isolated directory,
+    keeping the real cache-layout parsing in the loop."""
+    import functools
+
+    import huggingface_hub
+
+    real = huggingface_hub.try_to_load_from_cache
+    monkeypatch.setattr(
+        huggingface_hub,
+        "try_to_load_from_cache",
+        functools.partial(real, cache_dir=str(tmp_path)),
+    )
+    return tmp_path
+
+
+def _write_hub_cached_config(cache_root, repo_id: str, config: str) -> None:
+    """Lay out config.json the way huggingface_hub stores a cached repo."""
+    repo_dir = cache_root / f"models--{repo_id.replace('/', '--')}"
+    rev = "0" * 40
+    (repo_dir / "snapshots" / rev).mkdir(parents=True)
+    (repo_dir / "refs").mkdir()
+    (repo_dir / "refs" / "main").write_text(rev)
+    (repo_dir / "snapshots" / rev / "config.json").write_text(config)
+
+
+def test_cached_neutral_id_is_detected_from_hub_config(no_network, hub_cache):
+    """A neutral repo ID (no VL marker) already in the hub cache must be
+    classified by its own config.json - the case that silently dropped video
+    for Qwen3.8 - and without any network traffic."""
+    _write_hub_cached_config(
+        hub_cache,
+        "mlx-community/Qwen-Neutral-Name-4bit",
+        '{"architectures": ["Qwen3_5ForConditionalGeneration"],'
+        ' "vision_config": {}, "video_token_id": 248057}',
+    )
+    assert is_mllm_model("mlx-community/Qwen-Neutral-Name-4bit") is True
+
+
+def test_cached_text_only_id_stays_text_only(no_network, hub_cache):
+    """The cached config governs in both directions: a text-only config keeps
+    a model text-only even if a broad name pattern would have matched."""
+    _write_hub_cached_config(
+        hub_cache,
+        "mlx-community/SomePixtral-Like-Name",
+        '{"architectures": ["Qwen3ForCausalLM"]}',
+    )
+    assert is_mllm_model("mlx-community/SomePixtral-Like-Name") is False
+
+
+def test_cold_neutral_id_falls_back_to_name_patterns_offline(no_network, hub_cache):
+    """A neutral ID with nothing cached is decided by name patterns alone,
+    before any download. This pins the current pre-download behaviour: the
+    CLI's MLLM-versus-LLM routing decision for a cold neutral ID is made from
+    the name, with no network attempted, and misroutes a neutrally-named VLM
+    until its config is cached. Resolving hub metadata before that decision
+    is a known follow-up; this test exists so the limitation is deliberate.
+    """
+    assert is_mllm_model("mlx-community/Totally-Uncached-Neutral-Model") is False
+    assert is_mllm_model("mlx-community/Uncached-Qwen3-VL-Named-Model") is True
+
+
 # --------------------------------------------------------------------------
 # The pinned mlx-vlm contract
 # --------------------------------------------------------------------------
@@ -215,15 +290,15 @@ def test_mixed_image_video_audio_are_routed_separately(fake_mlx_vlm, monkeypatch
     assert isinstance(gen_kwargs["video"][0], np.ndarray)
 
 
-def test_multiple_videos_share_the_first_clips_sampled_rate(fake_mlx_vlm, monkeypatch):
-    """Known limitation, pinned so a change is deliberate rather than accidental.
+def test_multiple_videos_fail_closed(fake_mlx_vlm, monkeypatch):
+    """More than one video per native request must be rejected, not mislabeled.
 
-    mlx_vlm.prepare_inputs takes a single scalar fps and fans it out to every
-    video, so a request carrying two clips labels the second one's frames using
-    the first one's rate. That value drives Qwen's interleaved timestamps.
-    Fixing it means calling the processor directly instead of going through
-    mlx_vlm.generate; until then this test documents the behaviour rather than
-    letting it pass unnoticed.
+    mlx_vlm.generate takes a single scalar fps and fans it out to every video,
+    so a request carrying two clips would label the second one's frames with
+    the first one's sampled rate - and that value drives Qwen's interleaved
+    timestamp tokens. Correct per-video timestamps mean calling the processor
+    directly instead of going through mlx_vlm.generate; until that exists the
+    path fails closed with the reason, before any decoding work is done.
     """
     messages = [
         {
@@ -234,12 +309,18 @@ def test_multiple_videos_share_the_first_clips_sampled_rate(fake_mlx_vlm, monkey
             ],
         }
     ]
-    _, gen_kwargs = _prepare(monkeypatch, messages)
+    with pytest.raises(ValueError, match="one video per request"):
+        _prepare(monkeypatch, messages)
 
-    decoded_rates = [2.5, 3.5]  # what the stub returned for the two clips
-    assert len(gen_kwargs["video"]) == 2
-    assert gen_kwargs["fps"] == decoded_rates[0]
-    assert gen_kwargs["fps"] != decoded_rates[1], "second clip's rate is discarded"
+    assert fake_mlx_vlm["load_video"] == [], "rejected before decoding starts"
+
+
+def test_single_video_is_unaffected_by_the_multi_video_guard(fake_mlx_vlm, monkeypatch):
+    messages = [
+        {"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}
+    ]
+    _, gen_kwargs = _prepare(monkeypatch, messages)
+    assert len(gen_kwargs["video"]) == 1
 
 
 def test_empty_decode_stops_the_request(fake_mlx_vlm, monkeypatch):
