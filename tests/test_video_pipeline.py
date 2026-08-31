@@ -86,7 +86,9 @@ def test_valid_decode_reports_display_orientation():
 def test_base64_video_gets_a_real_container_suffix(mime, suffix):
     """Splitting the MIME type yields ".quicktime"; decoders infer from this."""
     assert VIDEO_MIME_TO_SUFFIX[mime] == suffix
-    path = decode_base64_video(f"data:{mime};base64," + base64.b64encode(b"\0" * 16).decode())
+    path = decode_base64_video(
+        f"data:{mime};base64," + base64.b64encode(b"\0" * 16).decode()
+    )
     assert path.endswith(suffix)
 
 
@@ -257,10 +259,10 @@ def _prepare(monkeypatch, native_messages, **kwargs):
 
 def test_native_path_calls_load_video_with_our_caps(fake_mlx_vlm, monkeypatch):
     """video_max_frames must reach the decoder: upstream's default cap is 768."""
-    messages = [
-        {"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}
-    ]
-    text, gen_kwargs = _prepare(monkeypatch, messages, video_fps=2.0, video_max_frames=MAX_FRAMES)
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
+    text, gen_kwargs = _prepare(
+        monkeypatch, messages, video_fps=2.0, video_max_frames=MAX_FRAMES
+    )
 
     assert text == "PROMPT"
     call = fake_mlx_vlm["load_video"][0]
@@ -316,9 +318,7 @@ def test_multiple_videos_fail_closed(fake_mlx_vlm, monkeypatch):
 
 
 def test_single_video_is_unaffected_by_the_multi_video_guard(fake_mlx_vlm, monkeypatch):
-    messages = [
-        {"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}
-    ]
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
     _, gen_kwargs = _prepare(monkeypatch, messages)
     assert len(gen_kwargs["video"]) == 1
 
@@ -332,9 +332,7 @@ def test_empty_decode_stops_the_request(fake_mlx_vlm, monkeypatch):
         "load_video",
         lambda *a, **k: (_frames(0), 2.0),
     )
-    messages = [
-        {"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}
-    ]
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
     with pytest.raises(ValueError, match="Decoded 0 frames"):
         _prepare(monkeypatch, messages)
 
@@ -345,9 +343,7 @@ def test_missing_upstream_module_is_reported_not_swallowed(monkeypatch):
     """The 0.6 rename produced ModuleNotFoundError; it must stay an ImportError."""
     monkeypatch.setitem(sys.modules, "mlx_vlm", None)
     monkeypatch.setitem(sys.modules, "mlx_vlm.utils", None)
-    messages = [
-        {"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}
-    ]
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
     with pytest.raises((ImportError, AttributeError, TypeError)):
         _prepare(monkeypatch, messages)
 
