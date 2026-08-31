@@ -14,7 +14,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 
 from .cli_arg_types import (
