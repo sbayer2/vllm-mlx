@@ -183,7 +183,9 @@ def media_drop_warning(media_items: list[dict], prompt_tokens: int) -> str | Non
         return None
     if prompt_tokens >= MIN_PROMPT_TOKENS_WITH_MEDIA:
         return None
-    kinds = ", ".join(sorted({item["type"].replace("_url", "") for item in media_items}))
+    kinds = ", ".join(
+        sorted({item["type"].replace("_url", "") for item in media_items})
+    )
     return (
         f"WARNING: {len(media_items)} attachment(s) ({kinds}) were sent, but the "
         f"server counted only {prompt_tokens} prompt tokens - far too few to "
