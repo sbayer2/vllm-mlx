@@ -26,6 +26,7 @@ import argparse
 import base64
 import mimetypes
 from pathlib import Path
+from typing import Any
 
 import gradio as gr
 import requests
@@ -224,6 +225,25 @@ def check_server_multimodal(server_url: str) -> str | None:
     return None
 
 
+def _history_message_has_media(content: Any) -> bool:
+    """Whether one Gradio history message carried an attachment.
+
+    Read from the message itself rather than from state kept by the chat
+    function: the history belongs to the browser session that sent it, so
+    nothing is shared between sessions, and an edited, retried or cleared
+    conversation cannot inherit another conversation's markers. Gradio 6 sends
+    typed parts (``{"type": "file", "file": {...}}``); Gradio 4/5 send
+    ``{"path": ...}`` dicts or file tuples.
+    """
+    if isinstance(content, tuple):
+        return True
+    if isinstance(content, dict):
+        return content.get("type") == "file" or "path" in content or "file" in content
+    if isinstance(content, list):
+        return any(_history_message_has_media(part) for part in content)
+    return False
+
+
 def create_chat_function(
     server_url: str,
     max_tokens: int,
@@ -242,10 +262,11 @@ def create_chat_function(
     Returns:
         Chat function compatible with gr.ChatInterface
     """
-    # Remember which historical user messages had media without retaining or
-    # replaying their base64 payloads. A 16 MB video becomes roughly 22 MB in a
-    # request and otherwise gets decoded and prefetched again on every turn.
-    media_message_indexes: set[int] = set()
+    # Historical media is never replayed: a 16 MB video becomes roughly 22 MB
+    # in a request and would be decoded and prefilled again on every turn.
+    # Which earlier turns had media is read from each session's own history
+    # (_history_message_has_media), never from state held here, because this
+    # one function serves every browser session.
 
     def chat(message: dict, history: list) -> str:
         """
@@ -262,12 +283,6 @@ def create_chat_function(
         text = message.get("text", "") if isinstance(message, dict) else message
         files = message.get("files", []) if isinstance(message, dict) else []
 
-        # Gradio reuses the chat function after the user clears the conversation.
-        # Drop indexes from the previous conversation so they cannot annotate a
-        # new chat whose message numbering starts at zero again.
-        if not history:
-            media_message_indexes.clear()
-
         # Build messages list for API
         messages = []
 
@@ -275,24 +290,29 @@ def create_chat_function(
         # Process history as text only. Historical media is represented by a
         # marker so the model knows it must request a reattachment rather than
         # hallucinating unseen visual details.
-        for i, msg in enumerate(history):
+        for msg in history:
             if isinstance(msg, dict):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
+                had_media = role == "user" and _history_message_has_media(content)
 
                 if isinstance(content, list):
                     text_parts = [
-                        p.get("text", "")
+                        p if isinstance(p, str) else p.get("text", "")
                         for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
+                        if isinstance(p, str)
+                        or (isinstance(p, dict) and p.get("type") == "text")
                     ]
                     content = " ".join(text_parts)
                 elif isinstance(content, dict):
-                    content = content.get("text", str(content))
+                    # A file dict carries a local path, not words for the model.
+                    content = content.get("text", "")
+                elif isinstance(content, tuple):
+                    content = ""  # Gradio 4 file message: (path, alt_text)
                 elif not isinstance(content, str):
                     content = str(content)
 
-                if i in media_message_indexes and role == "user":
+                if had_media:
                     content = (
                         f"{content}\n\n{OMITTED_MEDIA_NOTE}"
                         if content
@@ -322,14 +342,10 @@ def create_chat_function(
         )
         messages.append({"role": "user", "content": current_content})
 
-        # Remember attachment presence, not its base64 bytes. This message will
-        # appear at index len(history) when Gradio submits the next turn.
         if media_items:
-            current_idx = len(history)
-            media_message_indexes.add(current_idx)
             print(
-                f"[Chat] Sent {len(media_items)} media item(s) for message {current_idx}; "
-                "historical replay disabled",
+                f"[Chat] Sent {len(media_items)} media item(s) on this turn; "
+                "they are not replayed on later turns",
                 flush=True,
             )
 
