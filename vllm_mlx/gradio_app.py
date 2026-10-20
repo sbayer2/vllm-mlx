@@ -268,14 +268,6 @@ def create_chat_function(
         if not history:
             media_message_indexes.clear()
 
-        # Debug output
-        import sys
-
-        print(f"[Chat] Text: {text!r}", flush=True)
-        print(f"[Chat] Files: {files}", flush=True)
-        print(f"[Chat] History length: {len(history)}", flush=True)
-        sys.stdout.flush()
-
         # Build messages list for API
         messages = []
 
@@ -340,11 +332,6 @@ def create_chat_function(
                 "historical replay disabled",
                 flush=True,
             )
-
-        # Debug
-        print(f"[Chat] Sending {len(messages)} messages to server")
-        if isinstance(current_content, list):
-            print(f"[Chat] Content types: {[c.get('type') for c in current_content]}")
 
         # Send request to server
         try:
