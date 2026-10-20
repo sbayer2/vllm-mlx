@@ -522,7 +522,15 @@ def serve_command(args):
     # asyncio default-executor threads inside itself, so a guard placed
     # after it runs too late to matter.
     server._exit_process_after_shutdown = True
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    finally:
+        # The opt-in is process-wide. When run() returns instead of exiting
+        # (tests mock it; an embedding caller keeps going), leaving it set
+        # would make the next lifespan shutdown in this interpreter call
+        # os._exit(0) - under pytest, ending the run with status 0 and no
+        # summary.
+        server._exit_process_after_shutdown = False
 
 
 def download_command(args):

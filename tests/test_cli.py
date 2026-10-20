@@ -298,6 +298,60 @@ models:
     assert server._model_manager.memory_budget_bytes == int(6.5 * (1024**3))
 
 
+def _models_config_serve_args(tmp_path):
+    from vllm_mlx import cli
+
+    config_path = tmp_path / "models.yaml"
+    config_path.write_text("""
+manager:
+  memory_budget_gb: 4
+models:
+  - name: test
+    path: /tmp/test-model
+""".strip())
+    return cli.create_parser().parse_args(
+        ["serve", "--models-config", str(config_path), "--offline"]
+    )
+
+
+def test_serve_command_clears_the_exit_opt_in_when_run_returns(tmp_path, monkeypatch):
+    """A returned uvicorn.run() must not leave the process-wide exit opt-in on.
+
+    Left on, the next lifespan shutdown in the same interpreter calls the
+    real os._exit(0); under pytest that ends the run with status 0 and no
+    summary, silently skipping every test after it.
+    """
+    from vllm_mlx import cli, server
+
+    monkeypatch.setattr(server, "_model_manager", None)
+    seen = {}
+    monkeypatch.setattr(
+        "uvicorn.run",
+        lambda *a, **k: seen.update(during=server._exit_process_after_shutdown),
+    )
+
+    cli.serve_command(_models_config_serve_args(tmp_path))
+
+    assert seen["during"] is True  # the serve process does opt in
+    assert server._exit_process_after_shutdown is False
+
+
+def test_serve_command_clears_the_exit_opt_in_when_run_raises(tmp_path, monkeypatch):
+    from vllm_mlx import cli, server
+
+    monkeypatch.setattr(server, "_model_manager", None)
+
+    def boom(*args, **kwargs):
+        raise OSError("address already in use")
+
+    monkeypatch.setattr("uvicorn.run", boom)
+
+    with pytest.raises(OSError, match="address already in use"):
+        cli.serve_command(_models_config_serve_args(tmp_path))
+
+    assert server._exit_process_after_shutdown is False
+
+
 class TestServeCommandMllmRouting:
     """Regression coverage for issue #748, bound at the real single-model
     CLI call site (cli.serve_command), not just the lower-level detection

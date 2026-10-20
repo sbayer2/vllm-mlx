@@ -8003,12 +8003,16 @@ def main():
     # Same guard the CLI serve path uses; see the module flag above.
     global _exit_process_after_shutdown
     _exit_process_after_shutdown = True
-    uvicorn.run(
-        app,
-        host=args.host,
-        port=args.port,
-        http=_make_keepalive_http_protocol(),
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=args.host,
+            port=args.port,
+            http=_make_keepalive_http_protocol(),
+        )
+    finally:
+        # Process-wide opt-in: never leave it set once run() has returned.
+        _exit_process_after_shutdown = False
 
 
 def create_parser() -> argparse.ArgumentParser:
