@@ -299,6 +299,16 @@ jobs:
             -v --tb=short \
             -m "not slow"
 
+      - name: Check the installed mlx-vlm still exposes the pinned video API
+        run: |
+          # The no-MLX job collects this test too, but skips it there for lack
+          # of MLX; only here does it check the dependency CI actually
+          # installs. Require a pass, not a skip, so a missing mlx-vlm cannot
+          # quietly turn the check into a no-op again.
+          pytest tests/test_video_pipeline.py::test_real_mlx_vlm_still_exposes_the_pinned_api \
+            -q -rs | tee pinned-api.log
+          grep -q "1 passed" pinned-api.log
+
       - name: Run EngineCore stream-affinity regression tests
         run: |
           # Fresh process so globals like mlx_lm.generate.generation_stream
