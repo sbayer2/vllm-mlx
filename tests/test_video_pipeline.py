@@ -272,6 +272,38 @@ def test_native_path_calls_load_video_with_our_caps(fake_mlx_vlm, monkeypatch):
     assert len(gen_kwargs["video"]) == 1
 
 
+def test_mlx_vlm_06_sampled_rate_is_passed_as_fps(fake_mlx_vlm, monkeypatch):
+    """mlx-vlm 0.6 returns the sampled fps as a float; it travels as ``fps``."""
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
+    _, gen_kwargs = _prepare(monkeypatch, messages, video_fps=2.0)
+
+    assert gen_kwargs["fps"] == 2.5  # the fake's first sampled rate
+    assert "video_metadata" not in gen_kwargs
+
+
+def test_mlx_vlm_07_metadata_is_passed_through_not_as_fps(monkeypatch):
+    """mlx-vlm 0.7 returns (frames, VideoMetadata). Passed as ``fps``, the
+    metadata object would be read as a sampling rate; it must travel as
+    ``video_metadata`` so the processor derives timestamps from it."""
+    metadata = types.SimpleNamespace(
+        total_num_frames=60, fps=30.0, frames_indices=list(range(0, 60, 15))
+    )
+    metadata.sampled_fps = 2.0
+
+    utils = types.ModuleType("mlx_vlm.utils")
+    utils.load_video = lambda path, **kwargs: (_frames(4), metadata)
+    package = types.ModuleType("mlx_vlm")
+    package.utils = utils
+    monkeypatch.setitem(sys.modules, "mlx_vlm", package)
+    monkeypatch.setitem(sys.modules, "mlx_vlm.utils", utils)
+
+    messages = [{"role": "user", "content": [{"type": "video", "video": "/tmp/a.mov"}]}]
+    _, gen_kwargs = _prepare(monkeypatch, messages, video_fps=2.0)
+
+    assert gen_kwargs["video_metadata"] == [metadata]
+    assert "fps" not in gen_kwargs
+
+
 def test_mixed_image_video_audio_are_routed_separately(fake_mlx_vlm, monkeypatch):
     """Images stay paths, videos become arrays, audio stays paths."""
     messages = [
@@ -353,24 +385,51 @@ def test_missing_upstream_module_is_reported_not_swallowed(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-def test_real_mlx_vlm_still_exposes_the_pinned_api():
-    """Pins the two entry points this path depends on, on Apple Silicon.
+def test_real_mlx_vlm_still_exposes_the_pinned_api(tmp_path):
+    """Pins the entry points this path depends on, against the installed mlx-vlm.
 
     mlx_vlm.video_generate vanished in 0.6 and took the whole video path with
-    it. If load_video or generate(video=...) moves again, this fails here
-    rather than in a user's request.
+    it; 0.7 reworked load_video (sampling options, a VideoMetadata return).
+    If the contract moves again, this fails here rather than in a request.
     """
     # Guard on mlx, not mlx_vlm: mlx_vlm can be installed and still fail to
     # import when MLX is absent, which importorskip would surface as an error
     # rather than a skip.
     pytest.importorskip("mlx")
     pytest.importorskip("mlx_vlm")
+    cv2 = pytest.importorskip("cv2")
+    import dataclasses
     import inspect
 
+    from mlx_vlm import utils as vlm_utils
     from mlx_vlm.generate import generate
-    from mlx_vlm.utils import load_video
 
     assert "video" in inspect.signature(generate).parameters
-    load_params = inspect.signature(load_video).parameters
+
+    # The sampling options we pass must be accepted: as named parameters
+    # (0.6) or as VideoSampling fields through **sampling_kwargs (0.7).
+    load_params = inspect.signature(vlm_utils.load_video).parameters
+    accepted = set(load_params)
+    takes_kwargs = any(p.kind is p.VAR_KEYWORD for p in load_params.values())
+    if takes_kwargs and hasattr(vlm_utils, "VideoSampling"):
+        accepted |= {f.name for f in dataclasses.fields(vlm_utils.VideoSampling)}
     for expected in ("fps", "max_frames", "min_frames", "frame_factor"):
-        assert expected in load_params, f"load_video lost {expected}"
+        assert expected in accepted, f"load_video no longer accepts {expected}"
+
+    # The return shape is what 0.7 changed: decode a real clip and check the
+    # second value is one of the two forms _prepare_native_video_inputs reads.
+    clip = tmp_path / "clip.mp4"
+    writer = cv2.VideoWriter(str(clip), cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 48))
+    for i in range(20):
+        writer.write(np.full((48, 64, 3), i * 10, dtype=np.uint8))
+    writer.release()
+
+    frames, sampling_info = vlm_utils.load_video(
+        str(clip), fps=2.0, max_frames=8, min_frames=2, frame_factor=2
+    )
+    assert frames.ndim == 4 and frames.shape[0] >= 2
+    if hasattr(sampling_info, "frames_indices"):
+        assert len(sampling_info.frames_indices) == frames.shape[0]
+        assert sampling_info.sampled_fps > 0
+    else:
+        assert isinstance(sampling_info, (int, float)) and sampling_info > 0

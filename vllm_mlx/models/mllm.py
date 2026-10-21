@@ -2028,9 +2028,13 @@ class MLXMultimodalLM:
         # Decode each video to (T, C, H, W) frames and validate the result
         # before it can reach the model.
         videos: list[np.ndarray] = []
+        # mlx-vlm >= 0.7 returns a VideoMetadata per clip (source fps plus the
+        # sampled frame indices) and derives each clip's timestamps from it;
+        # 0.6 returned the sampled fps as a bare float.
+        video_metadata: list = []
         sample_fps: float | None = None
         for path in video_paths:
-            frames, decoded_fps = load_video(
+            frames, sampling_info = load_video(
                 path,
                 fps=video_fps,
                 max_frames=video_max_frames,
@@ -2041,8 +2045,13 @@ class MLXMultimodalLM:
             # a single frame.
             assert_video_decoded(frames, path, height_axis=1, width_axis=2)
             videos.append(frames)
+            if hasattr(sampling_info, "frames_indices"):
+                video_metadata.append(sampling_info)
+                rate = sampling_info.sampled_fps
+            else:
+                rate = sampling_info
             if sample_fps is None:
-                sample_fps = decoded_fps
+                sample_fps = rate
 
         gen_kwargs: dict = {"video": videos}
         if image_paths:
@@ -2053,7 +2062,11 @@ class MLXMultimodalLM:
                 f"Native video: forwarding audio ({len(audio_inputs)} clip(s)) "
                 "to omni model alongside the video stream"
             )
-        if sample_fps:
+        if video_metadata:
+            # Hand the metadata back rather than a float: passed as ``fps``,
+            # a VideoMetadata would be read as a sampling rate.
+            gen_kwargs["video_metadata"] = video_metadata
+        elif sample_fps:
             # The processor needs the fps of the SAMPLED sequence (used for
             # timestamp tokens), not the source video's fps.
             gen_kwargs["fps"] = sample_fps
