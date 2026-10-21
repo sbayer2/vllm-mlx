@@ -49,6 +49,7 @@ import os
 import re
 import secrets
 import socket as _socket
+import sys
 import threading
 import time
 import uuid
@@ -1846,6 +1847,11 @@ async def _release_default_engine(*, count_activity: bool = True) -> None:
 # host process would be indefensible.
 _exit_process_after_shutdown: bool = False
 
+# The uvicorn.Server that run_uvicorn() is running, so lifespan shutdown can
+# tell a server that listened from one whose bind failed (see
+# shutdown.should_exit_without_finalizing).
+_uvicorn_server: uvicorn.Server | None = None
+
 
 async def lifespan(app: FastAPI):
     """FastAPI lifespan for startup/shutdown events."""
@@ -1978,7 +1984,10 @@ async def lifespan(app: FastAPI):
         from .shutdown import exit_without_finalizing, should_exit_without_finalizing
 
         if should_exit_without_finalizing(
-            primary_exc, cleanup_exc, _exit_process_after_shutdown
+            primary_exc,
+            cleanup_exc,
+            _exit_process_after_shutdown,
+            listener_started=bool(_uvicorn_server and _uvicorn_server.started),
         ):
             logger.info("Shutdown complete")
             exit_without_finalizing()
@@ -8000,19 +8009,44 @@ def main():
     # Start server with TCP keepalive for fast dead-client detection.
     # Without this, abrupt client disconnects (power-off, network loss) take
     # 2+ hours to detect via default TCP keepalive, wasting GPU cycles.
-    # Same guard the CLI serve path uses; see the module flag above.
-    global _exit_process_after_shutdown
+    run_uvicorn(
+        app,
+        host=args.host,
+        port=args.port,
+        http=_make_keepalive_http_protocol(),
+    )
+
+
+def run_uvicorn(app_: FastAPI, **config_kwargs) -> None:
+    """Serve ``app_`` the way ``uvicorn.run`` does, for the serve entry points.
+
+    Same single-worker path as ``uvicorn.run`` - including its exit status 3
+    when the server never started - but the ``uvicorn.Server`` stays visible
+    to lifespan shutdown, which may end the process early only once that
+    server has started listening. Both entry points arm the process-wide exit
+    here (see ``_exit_process_after_shutdown``): ``uvicorn.run()`` joins the
+    asyncio default-executor threads inside itself, so a guard placed after it
+    runs too late to matter.
+    """
+    global _exit_process_after_shutdown, _uvicorn_server
+    from uvicorn.config import STARTUP_FAILURE
+
+    server = uvicorn.Server(uvicorn.Config(app_, **config_kwargs))
+    _uvicorn_server = server
     _exit_process_after_shutdown = True
     try:
-        uvicorn.run(
-            app,
-            host=args.host,
-            port=args.port,
-            http=_make_keepalive_http_protocol(),
-        )
+        server.run()
+    except KeyboardInterrupt:
+        pass
     finally:
-        # Process-wide opt-in: never leave it set once run() has returned.
+        # The opt-in is process-wide. When run() returns instead of exiting
+        # (tests; an embedding caller keeps going), leaving it set would make
+        # the next lifespan shutdown in this interpreter call os._exit(0) -
+        # under pytest, ending the run with status 0 and no summary.
         _exit_process_after_shutdown = False
+        _uvicorn_server = None
+    if not server.started:
+        sys.exit(STARTUP_FAILURE)
 
 
 def create_parser() -> argparse.ArgumentParser:

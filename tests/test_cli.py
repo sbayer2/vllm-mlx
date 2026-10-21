@@ -97,9 +97,7 @@ def test_continuous_batching_forwards_prefill_step_size_to_scheduler_config(
     server.app = object()
     server.load_model = lambda *args, **kwargs: captured.update(load_model=kwargs)
     server.load_model_registry = lambda *args, **kwargs: None
-
-    uvicorn = ModuleType("uvicorn")
-    uvicorn.run = lambda *args, **kwargs: None
+    server.run_uvicorn = lambda *args, **kwargs: None
 
     model_registry = ModuleType("vllm_mlx.model_registry")
     model_registry.RegistryServeDefaults = lambda **kwargs: SimpleNamespace(**kwargs)
@@ -123,7 +121,6 @@ def test_continuous_batching_forwards_prefill_step_size_to_scheduler_config(
     download.ensure_model_downloaded = lambda *args, **kwargs: None
 
     for name, module in {
-        "uvicorn": uvicorn,
         "vllm_mlx.server": server,
         "vllm_mlx.model_registry": model_registry,
         "vllm_mlx.scheduler": scheduler,
@@ -165,7 +162,7 @@ def test_serve_command_propagates_all_sampling_defaults(monkeypatch):
         "load_model",
         lambda *args, **kwargs: loaded.update({"args": args, "kwargs": kwargs}),
     )
-    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *args, **kwargs: None)
 
     for attr in (
         "_default_temperature",
@@ -290,7 +287,7 @@ models:
         ]
     )
     monkeypatch.setattr(server, "_model_manager", None)
-    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *args, **kwargs: None)
 
     cli.serve_command(args)
 
@@ -314,42 +311,30 @@ models:
     )
 
 
-def test_serve_command_clears_the_exit_opt_in_when_run_returns(tmp_path, monkeypatch):
-    """A returned uvicorn.run() must not leave the process-wide exit opt-in on.
-
-    Left on, the next lifespan shutdown in the same interpreter calls the
-    real os._exit(0); under pytest that ends the run with status 0 and no
-    summary, silently skipping every test after it.
+def test_serve_command_serves_through_run_uvicorn(tmp_path, monkeypatch):
+    """`vllm-mlx serve` must go through server.run_uvicorn, which arms the
+    early exit only for a server that started listening (the opt-in and
+    failed-bind cases are covered in test_shutdown_exit.py).
     """
     from vllm_mlx import cli, server
 
     monkeypatch.setattr(server, "_model_manager", None)
     seen = {}
     monkeypatch.setattr(
-        "uvicorn.run",
-        lambda *a, **k: seen.update(during=server._exit_process_after_shutdown),
+        server,
+        "run_uvicorn",
+        lambda app, **kwargs: seen.update(app=app, kwargs=kwargs),
     )
 
-    cli.serve_command(_models_config_serve_args(tmp_path))
+    args = _models_config_serve_args(tmp_path)
+    cli.serve_command(args)
 
-    assert seen["during"] is True  # the serve process does opt in
-    assert server._exit_process_after_shutdown is False
-
-
-def test_serve_command_clears_the_exit_opt_in_when_run_raises(tmp_path, monkeypatch):
-    from vllm_mlx import cli, server
-
-    monkeypatch.setattr(server, "_model_manager", None)
-
-    def boom(*args, **kwargs):
-        raise OSError("address already in use")
-
-    monkeypatch.setattr("uvicorn.run", boom)
-
-    with pytest.raises(OSError, match="address already in use"):
-        cli.serve_command(_models_config_serve_args(tmp_path))
-
-    assert server._exit_process_after_shutdown is False
+    assert seen["app"] is server.app
+    assert seen["kwargs"] == {
+        "host": args.host,
+        "port": args.port,
+        "log_level": "info",
+    }
 
 
 class TestServeCommandMllmRouting:
@@ -398,7 +383,7 @@ class TestServeCommandMllmRouting:
             "load_model",
             lambda *a, **k: loaded.update({"args": a, "kwargs": k}),
         )
-        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *a, **k: None)
 
         with caplog.at_level("INFO"):
             cli.serve_command(_serve_args(model="mlx-community/Qwen3.8-27B-8bit"))
@@ -430,7 +415,7 @@ class TestServeCommandMllmRouting:
         monkeypatch.setattr(
             server, "load_model", lambda *a, **k: called.setdefault("load_model", True)
         )
-        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *a, **k: None)
 
         with pytest.raises(SystemExit) as exc:
             cli.serve_command(_serve_args(model="someorg/mystery-repo"))
@@ -460,7 +445,7 @@ class TestServeCommandMllmRouting:
             "load_model",
             lambda *a, **k: loaded.update({"args": a, "kwargs": k}),
         )
-        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *a, **k: None)
 
         with caplog.at_level("INFO"):
             cli.serve_command(_serve_args(model="mlx-community/Qwen3.8-27B-8bit"))
@@ -492,7 +477,7 @@ class TestServeCommandMllmRouting:
             "load_model",
             lambda *a, **k: loaded.update({"args": a, "kwargs": k}),
         )
-        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *a, **k: None)
 
         with caplog.at_level("INFO"):
             cli.serve_command(_serve_args(model="mlx-community/text-model", mllm=True))
@@ -531,7 +516,7 @@ class TestServeCommandMllmRouting:
         monkeypatch.setattr(
             download, "ensure_model_downloaded", lambda *a, **k: snapshot
         )
-        monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
+        monkeypatch.setattr("vllm_mlx.server.run_uvicorn", lambda *a, **k: None)
         # load_model mutates module globals; restore them after the test.
         for name in (
             "_engine",

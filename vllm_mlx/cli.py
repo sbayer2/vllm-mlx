@@ -87,8 +87,6 @@ def serve_command(args):
     import os
     import sys
 
-    import uvicorn
-
     # Import unified server
     from . import server
     from .model_registry import RegistryServeDefaults
@@ -517,20 +515,9 @@ def serve_command(args):
 
     # Start server
     print(f"Starting server at http://{args.host}:{args.port}")
-    # Exit is handled at the end of lifespan shutdown (see
-    # server._exit_process_after_shutdown): uvicorn.run() joins the
-    # asyncio default-executor threads inside itself, so a guard placed
-    # after it runs too late to matter.
-    server._exit_process_after_shutdown = True
-    try:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-    finally:
-        # The opt-in is process-wide. When run() returns instead of exiting
-        # (tests mock it; an embedding caller keeps going), leaving it set
-        # would make the next lifespan shutdown in this interpreter call
-        # os._exit(0) - under pytest, ending the run with status 0 and no
-        # summary.
-        server._exit_process_after_shutdown = False
+    # Exit is handled at the end of lifespan shutdown, once the listener
+    # has started; see server.run_uvicorn.
+    server.run_uvicorn(app, host=args.host, port=args.port, log_level="info")
 
 
 def download_command(args):

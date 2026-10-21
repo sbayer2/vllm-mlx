@@ -35,13 +35,18 @@ PACKAGE = Path(__file__).resolve().parent.parent / "vllm_mlx"
 
 
 def test_clean_shutdown_with_optin_exits():
-    assert should_exit_without_finalizing(None, None, True, env={}) is True
+    assert (
+        should_exit_without_finalizing(None, None, True, listener_started=True, env={})
+        is True
+    )
 
 
 def test_primary_failure_never_exits():
     """A failed serving phase must propagate and exit non-zero."""
     assert (
-        should_exit_without_finalizing(RuntimeError("boom"), None, True, env={})
+        should_exit_without_finalizing(
+            RuntimeError("boom"), None, True, listener_started=True, env={}
+        )
         is False
     )
 
@@ -49,7 +54,9 @@ def test_primary_failure_never_exits():
 def test_cleanup_failure_never_exits():
     """A failed cleanup phase is a failed shutdown, not a success."""
     assert (
-        should_exit_without_finalizing(None, RuntimeError("boom"), True, env={})
+        should_exit_without_finalizing(
+            None, RuntimeError("boom"), True, listener_started=True, env={}
+        )
         is False
     )
 
@@ -57,8 +64,21 @@ def test_cleanup_failure_never_exits():
 def test_both_failures_never_exit():
     assert (
         should_exit_without_finalizing(
-            RuntimeError("a"), RuntimeError("b"), True, env={}
+            RuntimeError("a"), RuntimeError("b"), True, listener_started=True, env={}
         )
+        is False
+    )
+
+
+def test_failed_bind_never_exits():
+    """Uvicorn runs lifespan shutdown after a failed bind, then exits 3.
+
+    Nothing raised inside the app, so only the listener state tells this
+    shutdown apart from a clean one. Exiting here would turn uvicorn's
+    startup-failure status into 0.
+    """
+    assert (
+        should_exit_without_finalizing(None, None, True, listener_started=False, env={})
         is False
     )
 
@@ -66,7 +86,10 @@ def test_both_failures_never_exit():
 def test_env_disable_keeps_normal_finalization():
     """VLLM_MLX_CLEAN_EXIT=0 restores ordinary interpreter teardown."""
     env = {"VLLM_MLX_CLEAN_EXIT": "0"}
-    assert should_exit_without_finalizing(None, None, True, env=env) is False
+    assert (
+        should_exit_without_finalizing(None, None, True, listener_started=True, env=env)
+        is False
+    )
     assert clean_exit_enabled(env) is False
 
 
@@ -81,10 +104,13 @@ def test_embedded_use_never_exits():
     ours to do. The opt-in flag is threaded through explicitly, so with it
     false the decision is false no matter how clean the shutdown was.
     """
-    assert should_exit_without_finalizing(None, None, False, env={}) is False
+    assert (
+        should_exit_without_finalizing(None, None, False, listener_started=True, env={})
+        is False
+    )
     assert (
         should_exit_without_finalizing(
-            None, None, False, env={"VLLM_MLX_CLEAN_EXIT": "1"}
+            None, None, False, listener_started=True, env={"VLLM_MLX_CLEAN_EXIT": "1"}
         )
         is False
     )
@@ -175,22 +201,55 @@ def test_module_default_is_no_exit():
     assert defaults[0].value.value is False
 
 
-def test_both_launcher_call_sites_opt_in():
+def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} not found")
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    """Names of everything called in ``node``: ``f()`` -> f, ``a.f()`` -> a.f."""
+    names = set()
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        if isinstance(call.func, ast.Name):
+            names.add(call.func.id)
+        elif isinstance(call.func, ast.Attribute) and isinstance(
+            call.func.value, ast.Name
+        ):
+            names.add(f"{call.func.value.id}.{call.func.attr}")
+    return names
+
+
+def test_both_launchers_serve_through_run_uvicorn():
     """Both serve entry points — `vllm-mlx serve` (cli.py) and
-    `python -m vllm_mlx.server` (server.py main) — must set the flag True
-    before uvicorn.run, or the guard silently never fires on that path.
+    `python -m vllm_mlx.server` (server.py main) — must serve through
+    server.run_uvicorn, which arms the exit and exposes the uvicorn.Server
+    the lifespan gate reads. A bare uvicorn.run() would hide Server.started,
+    and the guard would either never fire or fire after a failed bind.
     """
-    for module in ("cli.py", "server.py"):
-        tree = ast.parse((PACKAGE / module).read_text())
-        assigns = _assignments_to(tree, "_exit_process_after_shutdown")
-        true_assigns = [
-            a
-            for a in assigns
-            if isinstance(a.value, ast.Constant) and a.value.value is True
-        ]
-        assert (
-            true_assigns
-        ), f"{module}: no `_exit_process_after_shutdown = True` call site"
+    cli_calls = _called_names(
+        _function(ast.parse((PACKAGE / "cli.py").read_text()), "serve_command")
+    )
+    main_calls = _called_names(
+        _function(ast.parse((PACKAGE / "server.py").read_text()), "main")
+    )
+    assert "server.run_uvicorn" in cli_calls
+    assert "run_uvicorn" in main_calls
+    assert "uvicorn.run" not in cli_calls | main_calls
+
+
+def test_run_uvicorn_opts_in():
+    """run_uvicorn must set the flag True, or the guard never fires."""
+    tree = ast.parse((PACKAGE / "server.py").read_text())
+    assigns = _assignments_to(
+        _function(tree, "run_uvicorn"), "_exit_process_after_shutdown"
+    )
+    assert any(
+        isinstance(a.value, ast.Constant) and a.value.value is True for a in assigns
+    ), "run_uvicorn: no `_exit_process_after_shutdown = True`"
 
 
 def test_lifespan_consults_the_shared_predicate():
@@ -211,3 +270,5 @@ def test_lifespan_consults_the_shared_predicate():
     assert (
         len(args) == 3
     ), "predicate must receive primary_exc, cleanup_exc, opt-in flag"
+    keywords = {kw.arg for kw in calls[0].keywords}
+    assert "listener_started" in keywords, "lifespan must pass the listener state"

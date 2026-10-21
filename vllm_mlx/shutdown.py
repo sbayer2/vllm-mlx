@@ -43,6 +43,8 @@ def should_exit_without_finalizing(
     primary_exc: BaseException | None,
     cleanup_exc: BaseException | None,
     exit_process_after_shutdown: bool,
+    *,
+    listener_started: bool,
     env: Mapping[str, str] | None = None,
 ) -> bool:
     """Decide whether lifespan shutdown may skip CPython finalization.
@@ -54,8 +56,16 @@ def should_exit_without_finalizing(
     success. Embedded/library use never opts in
     (``exit_process_after_shutdown`` stays false), because exiting the host
     process would be indefensible.
+
+    ``listener_started`` must be uvicorn's own ``Server.started``. Uvicorn
+    also runs lifespan shutdown when it cannot bind the port, and only then
+    exits with its startup-failure status (3). That shutdown raises nothing
+    here — the bind error never reaches the app — so without this gate a
+    server that never listened would exit 0.
     """
     if not exit_process_after_shutdown:
+        return False
+    if not listener_started:
         return False
     if primary_exc is not None or cleanup_exc is not None:
         return False
