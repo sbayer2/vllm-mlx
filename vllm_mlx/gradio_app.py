@@ -157,11 +157,6 @@ def build_message_content(
     return content if content else text
 
 
-# A single image or a sampled video costs the model hundreds to thousands of
-# prompt tokens. If media was attached and the whole prompt came in under this,
-# the attachment never reached the model.
-MIN_PROMPT_TOKENS_WITH_MEDIA = 200
-
 # Historical image/video bytes are intentionally not replayed on every turn.
 # Reattaching is explicit and avoids repeatedly decoding and prefilling the same
 # large media payload for ordinary text follow-ups.
@@ -171,47 +166,14 @@ OMITTED_MEDIA_NOTE = (
 )
 
 
-def media_drop_warning(media_items: list[dict], prompt_tokens: int) -> str | None:
-    """Detect an attachment that was accepted and then silently dropped.
-
-    Every media-handling bug found in this stack returned HTTP 200 with a
-    fluent answer — "I don't see any video" — and everyone blamed the model.
-    The cheapest reliable discriminator needs no ground truth: compare the
-    prompt token count against the same request with no attachment. A dropped
-    attachment leaves it in the dozens; a real one puts it in the thousands.
-    """
-    if not media_items or not prompt_tokens:
-        return None
-    if prompt_tokens >= MIN_PROMPT_TOKENS_WITH_MEDIA:
-        return None
-    kinds = ", ".join(
-        sorted({item["type"].replace("_url", "") for item in media_items})
-    )
-    return (
-        f"WARNING: {len(media_items)} attachment(s) ({kinds}) were sent, but the "
-        f"server counted only {prompt_tokens} prompt tokens - far too few to "
-        "contain them. The attachment was almost certainly dropped before the "
-        "model saw it, so the answer above describes nothing. Check that the "
-        "server loaded a multimodal model (GET /health -> model_type should be "
-        '"mllm"; force it with `vllm-mlx serve --mllm ...`).'
-    )
-
-
-def check_server_multimodal(server_url: str) -> str | None:
-    """Return a warning if the server is not serving a multimodal model.
+def text_only_model_warning(health: dict) -> str | None:
+    """Return a warning if a /health payload shows a text-only model.
 
     Model capability is detected from the model's config.json, but a text-only
     load accepts image/video requests anyway and silently discards the media
-    parts. Better to say so at startup than to let every answer look like a
-    model that cannot see.
+    parts. This is the server's own statement of what it loaded, so it needs
+    no guess about how many tokens an attachment should cost.
     """
-    try:
-        response = requests.get(f"{server_url}/health", timeout=10)
-        response.raise_for_status()
-        health = response.json()
-    except Exception as e:
-        return f"Could not reach {server_url}/health ({e}); is the server running?"
-
     if not health.get("model_loaded", False):
         return None  # lazy load: capability is not known yet
 
@@ -223,6 +185,56 @@ def check_server_multimodal(server_url: str) -> str | None:
             "with a multimodal model, or force it with `vllm-mlx serve --mllm`."
         )
     return None
+
+
+def check_server_multimodal(server_url: str) -> str | None:
+    """Return a warning if the server is not serving a multimodal model.
+
+    Better to say so at startup than to let every answer look like a model
+    that cannot see.
+    """
+    try:
+        response = requests.get(f"{server_url}/health", timeout=10)
+        response.raise_for_status()
+        health = response.json()
+    except Exception as e:
+        return f"Could not reach {server_url}/health ({e}); is the server running?"
+
+    return text_only_model_warning(health)
+
+
+def media_drop_warning(media_items: list[dict], server_url: str) -> str | None:
+    """Detect an attachment that was accepted and then silently dropped.
+
+    Every media-handling bug found in this stack returned HTTP 200 with a
+    fluent answer — "I don't see any video" — and everyone blamed the model.
+    Undecodable video now fails loudly server-side; the silent drop left is a
+    text-only load, which the startup check cannot see behind
+    --lazy-load-model. So ask the server after the answer, once the model is
+    loaded. A prompt-token floor cannot stand in for this: a small image can
+    legitimately cost a handful of visual tokens (Qwen2-VL encodes 56x56
+    pixels as four).
+
+    Silent when /health cannot be read: an unknown is not evidence of a drop.
+    """
+    if not media_items:
+        return None
+    try:
+        response = requests.get(f"{server_url}/health", timeout=10)
+        response.raise_for_status()
+        reason = text_only_model_warning(response.json())
+    except Exception:
+        return None
+    if reason is None:
+        return None
+    kinds = ", ".join(
+        sorted({item["type"].replace("_url", "") for item in media_items})
+    )
+    return (
+        f"WARNING: {len(media_items)} attachment(s) ({kinds}) were sent, but "
+        "the server dropped them before the model saw them, so the answer "
+        f"above describes nothing. {reason}"
+    )
 
 
 def _history_message_has_media(content: Any) -> bool:
@@ -365,11 +377,7 @@ def create_chat_function(
             result = response.json()
             answer = result["choices"][0]["message"]["content"]
 
-            usage = result.get("usage", {}) or {}
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            print(f"[Chat] prompt_tokens={prompt_tokens}", flush=True)
-
-            warning = media_drop_warning(media_items, prompt_tokens)
+            warning = media_drop_warning(media_items, server_url)
             if warning:
                 print(f"[Chat] {warning}", flush=True)
                 return f"{answer}\n\n---\n{warning}"
