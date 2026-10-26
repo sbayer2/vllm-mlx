@@ -63,7 +63,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest anyio pytest-cov pydantic fastapi jsonschema httpx psutil transformers requests
+          pip install pytest anyio pytest-cov pydantic fastapi jsonschema httpx psutil transformers requests "gradio>=4.0.0"
 
       - name: Run unit tests (no MLX required)
         run: |
@@ -100,6 +100,7 @@ jobs:
             tests/test_anthropic_adapter_canonicalization.py \
             tests/test_mllm_stream_usage.py \
             tests/test_constrained_cache.py \
+            tests/test_gradio_app.py \
             tests/test_dependency_floors.py \
             tests/test_ssd_cache_shutdown.py \
             tests/test_chat_template_safety.py \
